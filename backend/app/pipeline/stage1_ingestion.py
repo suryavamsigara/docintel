@@ -81,7 +81,7 @@ if __name__ == "__main__":
 
     async def run_test():
         root = Path(__file__).parent.parent.parent.parent
-        file_path = root / 'docs' / 'suryavamsigara_resume.pdf'
+        file_path = root / 'docs' / 'side.pdf'
         
         if not file_path.exists():
             print(f"❌ Test file not found: {file_path}")
