@@ -74,7 +74,7 @@ if __name__ == "__main__":
     async def run_test():
         # Adjust path as necessary to point to your test documents
         root = Path(__file__).parent.parent.parent.parent
-        file_path = root / 'docs' / 'multi-sheets.xlsx' 
+        file_path = root / 'docs' / 'inv.jpg' 
         
         if not file_path.exists():
             print(f"❌ Test file not found: {file_path}")

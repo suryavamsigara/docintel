@@ -1,42 +1,61 @@
 import io
-import re
-import pytesseract
 from PIL import Image
+import pytesseract
+from typing import Dict, Any
+from app.models import Page, ListGroup, OcrText, NormalizedDocument
 
-def clean_ocr_artifacts(text: str) -> str:
-    """Fixes common scanning artifacts."""
-    # Fix broken words split across lines by hyphens
-    text = re.sub(r'-\n\s*', '', text)
-    # Fix common ligature misreadings (e.g., 'fi' read as 'fl' or separate letters)
-    text = text.replace('ﬁ', 'fi').replace('ﬂ', 'fl')
-    # Normalize excessive whitespaces
-    text = re.sub(r'\s+', ' ', text)
-    return text.strip()
-
-def process_image_pil(img: Image.Image) -> dict:
-    # Get verbose data from Tesseract to access confidence scores
-    data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
-    
-    valid_confidences = [int(conf) for conf in data['conf'] if int(conf) != -1]
-    
-    avg_conf = 0
-    if valid_confidences:
-        avg_conf = sum(valid_confidences) / len(valid_confidences)
-    
-    # Extract plain text
-    raw_text = pytesseract.image_to_string(img)
-    cleaned_text = clean_ocr_artifacts(raw_text)
-
-    # Configurable threshold for low quality (e.g., 70%)
-    is_low_quality = avg_conf < 70
-
-    return {
-        "data": cleaned_text, 
-        "confidence": avg_conf, 
-        "low_quality": is_low_quality
-    }
-
-def process_image(file_bytes: bytes) -> dict:
+def process_image(file_bytes: bytes, filename: str) -> NormalizedDocument:
+    """
+    Runs Tesseract OCR directly on uploaded image files (JPG/PNG).
+    """
     img = Image.open(io.BytesIO(file_bytes))
-    result = process_image_pil(img)
-    return {"data": [{"type": "ocr_text", "content": result["data"]}], "low_quality": result["low_quality"]}
+    
+    # Convert to grayscale for slightly better OCR accuracy on receipts
+    img = img.convert('L') 
+    
+    ocr_data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
+    
+    blocks_dict: Dict[tuple, Any] = {}
+    low_quality = False
+    
+    for i, word in enumerate(ocr_data['text']):
+        if not word.strip(): continue
+        
+        conf = float(ocr_data['conf'][i])
+        if conf < 70.0:
+            low_quality = True
+            
+        b_num, p_num = ocr_data['block_num'][i], ocr_data['par_num'][i]
+        key = (b_num, p_num)
+        
+        if key not in blocks_dict:
+            blocks_dict[key] = {'text': [], 'conf': [], 'bbox': [9999, 9999, 0, 0]}
+            
+        x, y, w, h = ocr_data['left'][i], ocr_data['top'][i], ocr_data['width'][i], ocr_data['height'][i]
+        
+        blocks_dict[key]['text'].append(word)
+        blocks_dict[key]['conf'].append(conf)
+        blocks_dict[key]['bbox'][0] = min(blocks_dict[key]['bbox'][0], x)
+        blocks_dict[key]['bbox'][1] = min(blocks_dict[key]['bbox'][1], y)
+        blocks_dict[key]['bbox'][2] = max(blocks_dict[key]['bbox'][2], x + w)
+        blocks_dict[key]['bbox'][3] = max(blocks_dict[key]['bbox'][3], y + h)
+
+    elements = []
+    # Sort logically by layout
+    for key in sorted(blocks_dict.keys()):
+        block = blocks_dict[key]
+        text = " ".join(block['text'])
+        avg_conf = sum(block['conf']) / len(block['conf'])
+        bbox = tuple(block['bbox'])
+        
+        if text.startswith(("•", "-", "*", "1.")):
+            elements.append(ListGroup(bbox=bbox, items=[text], confidence=avg_conf))
+        else:
+            elements.append(OcrText(bbox=bbox, text=text, confidence=avg_conf))
+
+    return NormalizedDocument(
+        filename=filename,
+        pages=[Page(number=1, elements=elements, requires_ocr=True, low_quality=low_quality)],
+        ocr_used=True,
+        low_quality=low_quality
+    )
