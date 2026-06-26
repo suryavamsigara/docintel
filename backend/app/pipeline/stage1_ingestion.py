@@ -1,22 +1,21 @@
 import os
 import mimetypes
-from typing import AsyncGenerator, Dict, Any
+from typing import Dict, Any
 from fastapi import UploadFile, HTTPException
 
-# Import the streaming parser we just built
-from app.services.pdf_parser import process_pdf_stream
-# from app.services.docx_parser import process_docx_stream
-# from app.services.excel_parser import process_excel_stream
-# from app.services.image_parser import process_image_stream
+from app.services.pdf_parser import process_pdf
+from app.services.docx_parser import process_docx
+from app.services.excel_parser import process_excel
+from app.services.image_parser import process_image
 
-async def run_ingestion_stream(file: UploadFile) -> AsyncGenerator[Dict[str, Any], None]:
+async def run_ingestion_stage(file: UploadFile) -> Dict[str, Any]:
     """
-    Stage 1: Ingestion and Normalization.
+    Ingestion and Normalization (Pre-Pipeline Stage).
     Routes the file to the appropriate parser based on MIME type and extension,
-    and streams the extracted pages back to the caller for real-time WebSocket delivery.
+    and returns the fully processed NormalizedDocument payload.
     """
     # Read file into memory (FastAPI spools large files to disk, 
-    # but we need bytes for PyMuPDF/fitz stream processing)
+    # but we need bytes for PyMuPDF/docx/openpyxl processing)
     content = await file.read()
     filename = file.filename
     mime_type, _ = mimetypes.guess_type(filename)
@@ -31,30 +30,23 @@ async def run_ingestion_stream(file: UploadFile) -> AsyncGenerator[Dict[str, Any
 
     try:
         if is_pdf:
-            # Iterate over the sync generator and yield async-friendly chunks
-            for page in process_pdf_stream(content, filename):
-                yield {
-                    "stage": "ingestion", 
-                    "status": "processing", 
-                    "filename": filename,
-                    "data": page.model_dump()
-                }
-                
+            doc = process_pdf(content, filename)
         elif is_docx:
-            yield {"stage": "ingestion", "status": "error", "message": "DOCX parser not yet implemented"}
-            # for page in process_docx_stream(content, filename): 
-            #     yield {"stage": "ingestion", "status": "processing", "data": page.model_dump()}
-            
+            doc = process_docx(content, filename)
         elif is_excel:
-            yield {"stage": "ingestion", "status": "error", "message": "Excel parser not yet implemented"}
-            # for sheet in process_excel_stream(content, filename): ...
-            
+            doc = process_excel(content, filename)
         elif is_image:
-            yield {"stage": "ingestion", "status": "error", "message": "Image parser not yet implemented"}
-            # for page in process_image_stream(content, filename): ...
-            
+            doc = process_image(content, filename)
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported file format: {extension}")
+            
+        # Return the payload formatted perfectly for your WebSocket orchestrator
+        return {
+            "stage": "ingestion", 
+            "status": "complete", 
+            "filename": filename,
+            "data": doc.model_dump()
+        }
             
     finally:
         # Crucial for Railway: aggressively release file handles and memory
@@ -80,8 +72,9 @@ if __name__ == "__main__":
             pass
 
     async def run_test():
+        # Adjust path as necessary to point to your test documents
         root = Path(__file__).parent.parent.parent.parent
-        file_path = root / 'docs' / 'doc2.pdf'
+        file_path = root / 'docs' / 'side.pdf' 
         
         if not file_path.exists():
             print(f"❌ Test file not found: {file_path}")
@@ -93,15 +86,20 @@ if __name__ == "__main__":
         print(f"🚀 Starting ingestion pipeline for: {mock_file.filename}\n" + "-"*50)
         
         try:
-            async for result in run_ingestion_stream(mock_file):
-                if result.get("status") == "processing":
-                    page_data = result["data"]
-                    print(f"✅ Yielded Page {page_data['number']} | "
-                          f"OCR Used: {page_data['requires_ocr']} | "
-                          f"Elements: {page_data['elements']} | "
-                          f"Elements Extracted: {len(page_data['elements'])}")
-                else:
-                    print(f"⚠️ Pipeline Message: {result}")
+            # Wait for the entire ingestion stage to complete
+            result = await run_ingestion_stage(mock_file)
+            doc_data = result["data"]
+            
+            print(f"✅ Ingestion Stage Complete!")
+            print(f"📄 Filename: {result['filename']}")
+            print(f"📑 Total Pages: {len(doc_data['pages'])}")
+            print(f"🔍 OCR Used: {doc_data['ocr_used']}")
+            print(f"⚠️ Low Quality Flag: {doc_data['low_quality']}")
+            
+            if doc_data['pages']:
+                print(f"🧩 Elements on Page 1: {len(doc_data['pages'][0]['elements'])}")
+                print(f"Pages: {doc_data['pages']}")
+                
         except Exception as e:
             print(f"❌ Pipeline failed: {str(e)}")
             

@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 class ElementBase(BaseModel):
     """Base schema ensuring spatial awareness and confidence scoring."""
     bbox: Optional[Tuple[float, float, float, float]] = None
-    confidence: Optional[float] = 100.0  # Default digital confidence
+    confidence: Optional[float] = 100.0  
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 class Heading(ElementBase):
@@ -40,4 +40,8 @@ class Page(BaseModel):
 class NormalizedDocument(BaseModel):
     filename: str
     pages: List[Page] = Field(default_factory=list)
+    # --- ADDED THESE TWO BACK IN ---
+    ocr_used: bool = False          
+    low_quality: bool = False       
+    # -------------------------------
     metadata: dict[str, Any] = Field(default_factory=dict)
