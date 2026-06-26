@@ -1,8 +1,34 @@
+import re
 import fitz
 import pymupdf4llm
 import pytesseract
 from PIL import Image
 from app.models import Page, Paragraph, Heading, Table, ListGroup, OcrText, NormalizedDocument
+
+def clean_markdown(text: str) -> str:
+    if not text:
+        return ""
+
+    # Remove heading markers
+    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)
+
+    # Bold
+    text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
+
+    # Italic
+    text = re.sub(r"_(.*?)_", r"\1", text)
+    text = re.sub(r"\*(.*?)\*", r"\1", text)
+
+    # Inline code
+    text = re.sub(r"`([^`]*)`", r"\1", text)
+
+    # Markdown links
+    text = re.sub(r"\[(.*?)\]\((.*?)\)", r"\1", text)
+
+    # Collapse whitespace
+    text = re.sub(r"\s+", " ", text)
+
+    return text.strip()
 
 def process_pdf(file_bytes: bytes, filename: str) -> NormalizedDocument:
     """
@@ -46,8 +72,7 @@ def process_pdf(file_bytes: bytes, filename: str) -> NormalizedDocument:
             
             for box in chunk.get("page_boxes", []):
                 start, stop = box.get("pos", (0, 0))
-                box_text = md_text[start:stop].strip()
-                
+                box_text = clean_markdown(md_text[start:stop])
                 if not box_text:
                     continue
                     
@@ -67,12 +92,18 @@ def process_pdf(file_bytes: bytes, filename: str) -> NormalizedDocument:
                     rows = []
                     
                     if len(lines) >= 3 and "|" in lines[0]:
-                        headers = [col.strip() for col in lines[0].split("|")[1:-1]]
+                        headers = [
+                            clean_markdown(col.strip())
+                            for col in lines[0].split("|")[1:-1]
+                        ]
                         for row_line in lines[2:]: 
                             if "---" in row_line and set(row_line.replace("|", "").replace("-", "").strip()) == set():
                                 continue
                             if "|" in row_line:
-                                rows.append([col.strip() for col in row_line.split("|")[1:-1]])
+                                rows.append([
+                                clean_markdown(col.strip())
+                                for col in row_line.split("|")[1:-1]
+                            ])
                                 
                     elements.append(Table(bbox=bbox, headers=headers, rows=rows))
                     
