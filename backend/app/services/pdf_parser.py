@@ -9,24 +9,15 @@ def clean_markdown(text: str) -> str:
     if not text:
         return ""
 
-    # Remove heading markers
     text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)
-
-    # Bold
     text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
-
-    # Italic
     text = re.sub(r"_(.*?)_", r"\1", text)
     text = re.sub(r"\*(.*?)\*", r"\1", text)
-
-    # Inline code
     text = re.sub(r"`([^`]*)`", r"\1", text)
-
-    # Markdown links
     text = re.sub(r"\[(.*?)\]\((.*?)\)", r"\1", text)
 
-    # Collapse whitespace
-    text = re.sub(r"\s+", " ", text)
+    # Remove trailing spaces but preserve line breaks
+    text = "\n".join(line.strip() for line in text.splitlines())
 
     return text.strip()
 
@@ -64,6 +55,8 @@ def process_pdf(file_bytes: bytes, filename: str) -> NormalizedDocument:
 
         # --- 2. Extract Superior Digital Layout via pymupdf4llm ---
         elements = []
+        list_buffer = []
+        list_bbox = None
         chunk_list = pymupdf4llm.to_markdown(doc, pages=[page_num], page_chunks=True)
         
         if chunk_list:
@@ -72,47 +65,107 @@ def process_pdf(file_bytes: bytes, filename: str) -> NormalizedDocument:
             
             for box in chunk.get("page_boxes", []):
                 start, stop = box.get("pos", (0, 0))
-                box_text = clean_markdown(md_text[start:stop])
-                if not box_text:
+                raw_box_text = md_text[start:stop].strip()
+
+                if not raw_box_text:
                     continue
-                    
+
                 bbox = tuple(box.get("bbox", [0, 0, 0, 0]))
                 box_class = box.get("class", "text")
-                
+
+                # Flush buffered list if we reached another element
+                if box_class != "list-item" and list_buffer:
+                    elements.append(
+                        ListGroup(
+                            bbox=list_bbox,
+                            items=list_buffer
+                        )
+                    )
+                    list_buffer = []
+                    list_bbox = None
+
                 if box_class == "section-header":
+                    clean_text = clean_markdown(raw_box_text)
+
                     level = 1
-                    if box_text.startswith("#"):
-                        level = min(len(box_text.split()[0]), 6)
-                        box_text = box_text.lstrip("# \t")
-                    elements.append(Heading(bbox=bbox, text=box_text, level=level))
-                    
+                    if raw_box_text.startswith("#"):
+                        level = min(len(raw_box_text.split()[0]), 6)
+
+                    elements.append(
+                        Heading(
+                            bbox=bbox,
+                            text=clean_text,
+                            level=level
+                        )
+                    )
+
                 elif box_class == "table":
-                    lines = [line.strip() for line in box_text.split('\n') if line.strip()]
+                    lines = [
+                        line.strip()
+                        for line in raw_box_text.split("\n")
+                        if line.strip()
+                    ]
+
                     headers = []
                     rows = []
-                    
+
                     if len(lines) >= 3 and "|" in lines[0]:
+
                         headers = [
                             clean_markdown(col.strip())
                             for col in lines[0].split("|")[1:-1]
                         ]
-                        for row_line in lines[2:]: 
-                            if "---" in row_line and set(row_line.replace("|", "").replace("-", "").strip()) == set():
+
+                        for row_line in lines[2:]:
+
+                            if (
+                                "---" in row_line
+                                and set(row_line.replace("|", "").replace("-", "").strip()) == set()
+                            ):
                                 continue
+
                             if "|" in row_line:
                                 rows.append([
-                                clean_markdown(col.strip())
-                                for col in row_line.split("|")[1:-1]
-                            ])
-                                
-                    elements.append(Table(bbox=bbox, headers=headers, rows=rows))
-                    
+                                    clean_markdown(col.strip())
+                                    for col in row_line.split("|")[1:-1]
+                                ])
+
+                    elements.append(
+                        Table(
+                            bbox=bbox,
+                            headers=headers,
+                            rows=rows
+                        )
+                    )
+
                 elif box_class == "list-item":
-                    clean_text = box_text.lstrip("* -")
-                    elements.append(ListGroup(bbox=bbox, items=[clean_text]))
-                    
+
+                    if list_bbox is None:
+                        list_bbox = bbox
+
+                    clean_text = clean_markdown(
+                        raw_box_text.lstrip("*-• ")
+                    )
+
+                    list_buffer.append(clean_text)
+
                 else:
-                    elements.append(Paragraph(bbox=bbox, text=box_text))
+
+                    elements.append(
+                        Paragraph(
+                            bbox=bbox,
+                            text=clean_markdown(raw_box_text)
+                        )
+                    )
+
+            # Flush trailing list
+            if list_buffer:
+                elements.append(
+                    ListGroup(
+                        bbox=list_bbox,
+                        items=list_buffer
+                    )
+                )
 
         # --- 3. Augment with High-DPI Targeted Image OCR ---
         page_low_quality = False

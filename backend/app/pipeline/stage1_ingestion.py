@@ -53,7 +53,7 @@ async def run_ingestion_stage(file: UploadFile) -> Dict[str, Any]:
         await file.close()
         del content
 
-"""
+
 # --- Local Testing Block ---
 if __name__ == "__main__":
     import asyncio
@@ -74,7 +74,7 @@ if __name__ == "__main__":
     async def run_test():
         # Adjust path as necessary to point to your test documents
         root = Path(__file__).parent.parent.parent.parent
-        file_path = root / 'docs' / 'inv.jpg' 
+        file_path = root / 'docs' / 'doc2.pdf' 
         
         if not file_path.exists():
             print(f"❌ Test file not found: {file_path}")
@@ -104,4 +104,3 @@ if __name__ == "__main__":
             print(f"❌ Pipeline failed: {str(e)}")
             
     asyncio.run(run_test())
-"""
