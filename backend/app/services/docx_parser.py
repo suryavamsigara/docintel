@@ -1,4 +1,5 @@
 import io
+import re
 import docx
 from docx.document import Document
 from docx.oxml.table import CT_Tbl
@@ -9,6 +10,35 @@ from PIL import Image
 import pytesseract
 
 from app.models import Page, Paragraph, Heading, Table, ListGroup, OcrText, NormalizedDocument
+
+MIN_OCR_CONFIDENCE = 50.0
+
+def post_process_ocr_text(text: str) -> str:
+    """
+    Detects and corrects common scanning artefacts produced by OCR engines.
+    """
+    if not text:
+        return ""
+        
+    text = re.sub(r'([a-zA-Z]+)-\s+([a-zA-Z]+)', r'\1\2', text)
+    
+    ligatures = {
+        'ﬁ': 'fi', 'ﬂ': 'fl', 'ﬀ': 'ff', 'ﬃ': 'ffi', 'ﬄ': 'ffl',
+        '|': 'l', '[': 'l', ']': 'l', 'rn': 'm',
+    }
+    
+    text = re.sub(r'([a-zA-Z])\|([a-zA-Z])', r'\1l\2', text)
+    text = re.sub(r'([a-zA-Z])\[([a-zA-Z])', r'\1l\2', text)
+    text = re.sub(r'([a-zA-Z])\]([a-zA-Z])', r'\1l\2', text)
+    
+    for search, replace in ligatures.items():
+        if search in ['|', '[', ']', 'rn']: continue
+        text = text.replace(search, replace)
+        
+    text = re.sub(r'\s+([.,;:?!])', r'\1', text)
+    text = re.sub(r'\s{2,}', ' ', text)
+
+    return text.strip()
 
 def iter_block_items(parent):
     """Yields each paragraph and table child within *parent*, in true document order."""
@@ -50,7 +80,6 @@ def process_docx_image(image_bytes: bytes) -> tuple[list, bool]:
         if not word.strip(): continue
         
         conf = float(ocr_data['conf'][i])
-        if conf < 70.0: low_quality = True
             
         b_num, p_num = ocr_data['block_num'][i], ocr_data['par_num'][i]
         key = (b_num, p_num)
@@ -62,16 +91,36 @@ def process_docx_image(image_bytes: bytes) -> tuple[list, bool]:
         blocks_dict[key]['conf'].append(conf)
 
     elements = []
+    list_buffer = []
+    
     for key in sorted(blocks_dict.keys()):
         block = blocks_dict[key]
-        text = " ".join(block['text'])
+        raw_text = " ".join(block['text'])
+        
+        # 1. RUN OCR POST-PROCESSING
+        clean_text = post_process_ocr_text(raw_text)
+        if not clean_text: continue
+        
         avg_conf = sum(block['conf']) / len(block['conf'])
         
-        # We don't have absolute page coordinates in DOCX, so bbox remains None
-        if text.startswith(("•", "-", "*", "1.")):
-            elements.append(ListGroup(items=[text], confidence=avg_conf))
+        # 2. Block-level quality check (avoids Speck of Dust bug)
+        if avg_conf < MIN_OCR_CONFIDENCE and len(clean_text) > 5:
+            low_quality = True
+            
+        is_list_item = clean_text.startswith(("•", "-", "*", "1."))
+        
+        if not is_list_item and list_buffer:
+            elements.append(ListGroup(items=list_buffer, confidence=avg_conf))
+            list_buffer = []
+            
+        if is_list_item:
+            clean_item = clean_text.lstrip("•- * \t")
+            list_buffer.append(clean_item)
         else:
-            elements.append(OcrText(text=text, confidence=avg_conf))
+            elements.append(OcrText(text=clean_text, confidence=avg_conf))
+            
+    if list_buffer:
+        elements.append(ListGroup(items=list_buffer, confidence=avg_conf))
             
     return elements, low_quality
 
@@ -119,7 +168,6 @@ def process_docx(file_bytes: bytes, filename: str) -> NormalizedDocument:
                     current_elements.append(Paragraph(text=text, confidence=100.0))
             
             # --- 2. Hunt for embedded images in this paragraph's XML ---
-            # Define Microsoft's standard XML namespaces explicitly to avoid 'prefix not found' errors
             DOCX_NAMESPACES = {
                 'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
                 'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
@@ -156,9 +204,14 @@ def process_docx(file_bytes: bytes, filename: str) -> NormalizedDocument:
     if current_elements:
         pages.append(Page(number=page_num, elements=current_elements, requires_ocr=doc_ocr_used))
         
+    metadata = {}
+    if doc_low_quality:
+        metadata["warning"] = f"OCR confidence dropped below {MIN_OCR_CONFIDENCE}%. Flagged for review."
+        
     return NormalizedDocument(
         filename=filename,
         pages=pages,
         ocr_used=doc_ocr_used,
-        low_quality=doc_low_quality
+        low_quality=doc_low_quality,
+        metadata=metadata
     )

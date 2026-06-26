@@ -5,6 +5,9 @@ import pytesseract
 from PIL import Image
 from app.models import Page, Paragraph, Heading, Table, ListGroup, OcrText, NormalizedDocument
 
+# Configurable threshold for flagging bad OCR
+MIN_OCR_CONFIDENCE = 50.0
+
 def clean_markdown(text: str) -> str:
     if not text:
         return ""
@@ -18,6 +21,42 @@ def clean_markdown(text: str) -> str:
 
     # Remove trailing spaces but preserve line breaks
     text = "\n".join(line.strip() for line in text.splitlines())
+
+    return text.strip()
+
+def post_process_ocr_text(text: str) -> str:
+    """
+    Detects and corrects common scanning artefacts produced by OCR engines.
+    """
+    if not text:
+        return ""
+        
+    # 1. Correct broken words split across lines (e.g. "docu- ment" -> "document")
+    # Tesseract splits line-breaks into separate words. When we join them with spaces, 
+    # hyphenated line breaks turn into "word- part". This regex sews them back together.
+    text = re.sub(r'([a-zA-Z]+)-\s+([a-zA-Z]+)', r'\1\2', text)
+    
+    # 2. Correct ligature misreadings and character confusions
+    ligatures = {
+        'ﬁ': 'fi', 'ﬂ': 'fl', 'ﬀ': 'ff', 'ﬃ': 'ffi', 'ﬄ': 'ffl',
+        '|': 'l',   # Pipe often misread instead of lower-case L or I
+        '[': 'l', ']': 'l', # Tall brackets often misread as L
+        'rn': 'm',  # Common Tesseract issue on skewed text
+    }
+    
+    # Context-aware replacement for intra-word artifacts (safely fixes "b|ock" -> "block")
+    text = re.sub(r'([a-zA-Z])\|([a-zA-Z])', r'\1l\2', text)
+    text = re.sub(r'([a-zA-Z])\[([a-zA-Z])', r'\1l\2', text)
+    text = re.sub(r'([a-zA-Z])\]([a-zA-Z])', r'\1l\2', text)
+    
+    for search, replace in ligatures.items():
+        if search in ['|', '[', ']', 'rn']: 
+            continue # Skip the ones handled by regex or unsafe for global replacement
+        text = text.replace(search, replace)
+        
+    # 3. Fix skewed text artifacts (orphaned punctuation, excessive spacing)
+    text = re.sub(r'\s+([.,;:?!])', r'\1', text) # Removes space before punctuation
+    text = re.sub(r'\s{2,}', ' ', text) # Squashes multiple spaces into one
 
     return text.strip()
 
@@ -110,14 +149,12 @@ def process_pdf(file_bytes: bytes, filename: str) -> NormalizedDocument:
                     rows = []
 
                     if len(lines) >= 3 and "|" in lines[0]:
-
                         headers = [
                             clean_markdown(col.strip())
                             for col in lines[0].split("|")[1:-1]
                         ]
 
                         for row_line in lines[2:]:
-
                             if (
                                 "---" in row_line
                                 and set(row_line.replace("|", "").replace("-", "").strip()) == set()
@@ -139,18 +176,15 @@ def process_pdf(file_bytes: bytes, filename: str) -> NormalizedDocument:
                     )
 
                 elif box_class == "list-item":
-
                     if list_bbox is None:
                         list_bbox = bbox
 
                     clean_text = clean_markdown(
                         raw_box_text.lstrip("*-• ")
                     )
-
                     list_buffer.append(clean_text)
 
                 else:
-
                     elements.append(
                         Paragraph(
                             bbox=bbox,
@@ -167,7 +201,7 @@ def process_pdf(file_bytes: bytes, filename: str) -> NormalizedDocument:
                     )
                 )
 
-        # --- 3. Augment with High-DPI Targeted Image OCR ---
+        # --- 3. Augment with High-DPI Targeted Image OCR & Post-Processing ---
         page_low_quality = False
         if should_run_custom_ocr:
             doc_ocr_used = True
@@ -189,9 +223,7 @@ def process_pdf(file_bytes: bytes, filename: str) -> NormalizedDocument:
                     if not word.strip(): continue
                     
                     conf = float(ocr_data['conf'][i])
-                    if conf < 70.0: 
-                        page_low_quality = True
-                        doc_low_quality = True
+                    # REMOVED: word-level low quality check that was triggering on smudges
                         
                     b_num, p_num = ocr_data['block_num'][i], ocr_data['par_num'][i]
                     key = (b_num, p_num)
@@ -213,14 +245,27 @@ def process_pdf(file_bytes: bytes, filename: str) -> NormalizedDocument:
                     blocks_dict[key]['bbox'][3] = max(blocks_dict[key]['bbox'][3], y + h)
 
                 for key, block in blocks_dict.items():
-                    text = " ".join(block['text'])
+                    # 1. Join words
+                    raw_text = " ".join(block['text'])
+                    
+                    # 2. RUN OCR POST-PROCESSING
+                    clean_text = post_process_ocr_text(raw_text)
+                    if not clean_text: continue
+                    
                     avg_conf = sum(block['conf']) / len(block['conf'])
                     el_bbox = tuple(block['bbox'])
                     
-                    if text.startswith(("•", "-", "*", "1.")):
-                        elements.append(ListGroup(bbox=el_bbox, items=[text], confidence=avg_conf))
+                    # NEW: Block-level quality check. 
+                    # We only flag if the average block confidence is low AND it's an actual word/sentence 
+                    # (length > 5) to prevent tiny smudges/artifacts from failing the whole document.
+                    if avg_conf < MIN_OCR_CONFIDENCE and len(clean_text) > 5:
+                        page_low_quality = True
+                        doc_low_quality = True
+                    
+                    if clean_text.startswith(("•", "-", "*", "1.")):
+                        elements.append(ListGroup(bbox=el_bbox, items=[clean_text], confidence=avg_conf))
                     else:
-                        elements.append(OcrText(bbox=el_bbox, text=text, confidence=avg_conf))
+                        elements.append(OcrText(bbox=el_bbox, text=clean_text, confidence=avg_conf))
 
                 # Free up memory explicitly to satisfy Railway limits
                 del pix
@@ -242,7 +287,7 @@ def process_pdf(file_bytes: bytes, filename: str) -> NormalizedDocument:
     
     metadata = {}
     if doc_low_quality:
-        metadata["warning"] = "Low OCR confidence detected in some parts of the document. Flagged for review."
+        metadata["warning"] = f"OCR confidence dropped below {MIN_OCR_CONFIDENCE}%. Flagged for review."
         
     return NormalizedDocument(
         filename=filename,
