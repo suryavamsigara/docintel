@@ -1,44 +1,43 @@
-from dataclasses import dataclass, field, asdict
-from typing import Literal, Any, List, Optional, Tuple
+from typing import Literal, Any, List, Optional, Tuple, Union
+from pydantic import BaseModel, Field
 
-@dataclass(kw_only=True)
-class Element:
-    """Base class for all document elements to ensure consistent metadata."""
-    type: Literal["heading", "paragraph", "table", "list", "image", "ocr_text"]
-    page: int
+class ElementBase(BaseModel):
+    """Base schema ensuring spatial awareness and confidence scoring."""
     bbox: Optional[Tuple[float, float, float, float]] = None
-    confidence: Optional[float] = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    confidence: Optional[float] = 100.0  # Default digital confidence
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
-@dataclass(kw_only=True)
-class Heading(Element):
-    level: int
+class Heading(ElementBase):
+    type: Literal["heading"] = "heading"
+    level: int = 1
     text: str
 
-@dataclass(kw_only=True)
-class Paragraph(Element):
+class Paragraph(ElementBase):
+    type: Literal["paragraph"] = "paragraph"
     text: str
 
-@dataclass(kw_only=True)
-class Table(Element):
+class Table(ElementBase):
+    type: Literal["table"] = "table"
+    headers: List[Optional[str]] = Field(default_factory=list)
     rows: List[List[Optional[str]]]
 
-@dataclass(kw_only=True)
-class ListGroup(Element):
+class ListGroup(ElementBase):
+    type: Literal["list"] = "list"
     items: List[str]
 
-@dataclass(kw_only=True)
-class Page:
+class OcrText(ElementBase):
+    type: Literal["ocr_text"] = "ocr_text"
+    text: str
+
+DocumentElement = Union[Heading, Paragraph, Table, ListGroup, OcrText]
+
+class Page(BaseModel):
     number: int
-    elements: List[Element] = field(default_factory=list)
-
-@dataclass(kw_only=True)
-class NormalizedDocument:
-    filename: str
-    pages: List[Page] = field(default_factory=list)
-    ocr_used: bool = False
+    elements: List[DocumentElement] = Field(default_factory=list)
+    requires_ocr: bool = False
     low_quality: bool = False
-    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> dict:
-        return asdict(self)
+class NormalizedDocument(BaseModel):
+    filename: str
+    pages: List[Page] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)

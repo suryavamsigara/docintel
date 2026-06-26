@@ -1,110 +1,108 @@
 import os
 import mimetypes
-from fastapi import UploadFile
-from typing import Dict, Any
+from typing import AsyncGenerator, Dict, Any
+from fastapi import UploadFile, HTTPException
 
-# Import parsers (uncomment others as we build them)
-from app.services.pdf_parser import process_pdf
-# from app.services.docx_parser import process_docx
-# from app.services.excel_parser import process_excel
-# from app.services.image_parser import process_image
+# Import the streaming parser we just built
+from app.services.pdf_parser import process_pdf_stream
+# from app.services.docx_parser import process_docx_stream
+# from app.services.excel_parser import process_excel_stream
+# from app.services.image_parser import process_image_stream
 
-async def run_ingestion_stage(file: UploadFile) -> Dict[str, Any]:
+async def run_ingestion_stream(file: UploadFile) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Stage 1: Ingestion and Normalization.
-    Routes the file to the appropriate parser based on MIME type and extension.
+    Routes the file to the appropriate parser based on MIME type and extension,
+    and streams the extracted pages back to the caller for real-time WebSocket delivery.
     """
+    # Read file into memory (FastAPI spools large files to disk, 
+    # but we need bytes for PyMuPDF/fitz stream processing)
     content = await file.read()
     filename = file.filename
     mime_type, _ = mimetypes.guess_type(filename)
     extension = os.path.splitext(filename)[1].lower()
 
-    result = {
-        "filename": filename,
-        "mime_type": mime_type,
-        "status": "success",
-        "document_data": None,
-        "warnings": []
-    }
+    # Robust routing logic: check both extension and mime_type 
+    # as uploads from clients can sometimes be inaccurate
+    is_pdf = extension == ".pdf" or mime_type == "application/pdf"
+    is_docx = extension == ".docx" or mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    is_excel = extension in [".xlsx", ".xls"] or (mime_type and "spreadsheetml" in mime_type)
+    is_image = extension in [".jpg", ".jpeg", ".png"] or (mime_type and mime_type.startswith("image/"))
 
     try:
-        if extension == '.pdf' or mime_type == 'application/pdf':
-            extraction = process_pdf(content, filename)
-        # elif extension == '.docx' or mime_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
-        #     extraction = process_docx(content, filename)
-        # elif extension == '.xlsx' or mime_type == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
-        #     extraction = process_excel(content, filename)
-        # elif extension in ['.png', '.jpg', '.jpeg'] or (mime_type and mime_type.startswith('image/')):
-        #     extraction = process_image(content, filename)
+        if is_pdf:
+            # Iterate over the sync generator and yield async-friendly chunks
+            for page in process_pdf_stream(content, filename):
+                yield {
+                    "stage": "ingestion", 
+                    "status": "processing", 
+                    "filename": filename,
+                    "data": page.model_dump()
+                }
+                
+        elif is_docx:
+            yield {"stage": "ingestion", "status": "error", "message": "DOCX parser not yet implemented"}
+            # for page in process_docx_stream(content, filename): 
+            #     yield {"stage": "ingestion", "status": "processing", "data": page.model_dump()}
+            
+        elif is_excel:
+            yield {"stage": "ingestion", "status": "error", "message": "Excel parser not yet implemented"}
+            # for sheet in process_excel_stream(content, filename): ...
+            
+        elif is_image:
+            yield {"stage": "ingestion", "status": "error", "message": "Image parser not yet implemented"}
+            # for page in process_image_stream(content, filename): ...
+            
         else:
-            raise ValueError(f"Unsupported file format: {extension}")
-
-        result["document_data"] = extraction
-        
-        # Surface OCR warnings if low_quality flag was tripped
-        if extraction.get("low_quality"):
-            result["warnings"].append("Low OCR confidence detected. Output may contain errors.")
-
-    except Exception as e:
-        result["status"] = "error"
-        result["error_message"] = str(e)
-
-    return result
+            raise HTTPException(status_code=400, detail=f"Unsupported file format: {extension}")
+            
+    finally:
+        # Crucial for Railway: aggressively release file handles and memory
+        await file.close()
+        del content
 
 
-# ---------------------------------------------------------
-# Test Runner for CLI
-# ---------------------------------------------------------
-import asyncio
-import io
-
+# --- Local Testing Block ---
 if __name__ == "__main__":
+    import asyncio
     from pathlib import Path
     
+    class MockUploadFile:
+        def __init__(self, path: Path):
+            self.path = path
+            self.filename = path.name
+            
+        async def read(self):
+            with open(self.path, "rb") as f:
+                return f.read()
+                
+        async def close(self):
+            pass
+
     async def run_test():
         root = Path(__file__).parent.parent.parent.parent
         file_path = root / 'docs' / 'suryavamsigara_resume.pdf'
-
+        
         if not file_path.exists():
-            print(f"⚠️  Could not find file at: {file_path}")
+            print(f"❌ Test file not found: {file_path}")
+            print("Please ensure the directory structure is correct or change the path.")
             return
-
-        file_bytes = file_path.read_bytes()
-        
-        mock_file = UploadFile(
-            file=io.BytesIO(file_bytes), 
-            filename=file_path.name
-        )
-
-        print(f"🚀 Running Stage 1 Ingestion on '{file_path.name}'...\n")
-        
-        output = await run_ingestion_stage(mock_file)
-        
-        if output["status"] == "success":
-            print("✅ Ingestion Successful! Here is the extracted structure:\n")
             
-            doc_data = output["document_data"]
-            print(f"📄 Document: {doc_data['filename']} (OCR Used: {doc_data.get('ocr_used', False)})")
+        mock_file = MockUploadFile(file_path)
+        
+        print(f"🚀 Starting ingestion pipeline for: {mock_file.filename}\n" + "-"*50)
+        
+        try:
+            async for result in run_ingestion_stream(mock_file):
+                if result.get("status") == "processing":
+                    page_data = result["data"]
+                    print(f"✅ Yielded Page {page_data['number']} | "
+                          f"OCR Used: {page_data['requires_ocr']} | "
+                          f"Elements: {page_data['elements']} | "
+                          f"Elements Extracted: {len(page_data['elements'])}")
+                else:
+                    print(f"⚠️ Pipeline Message: {result}")
+        except Exception as e:
+            print(f"❌ Pipeline failed: {str(e)}")
             
-            for page in doc_data.get("pages", []):
-                print(f"\n--- Page {page['number']} ---")
-                elements = page.get("elements", [])
-                
-                for elem in elements:
-                    elem_type = elem.get("type", "unknown").upper()
-                    
-                    if elem_type in ["HEADING", "PARAGRAPH"]:
-                        text = elem.get("text", "").replace("\n", " ")
-                        display_text = text[:80] + "..." if len(text) > 80 else text
-                        print(f"[{elem_type}] {display_text}")
-                    
-                    elif elem_type == "TABLE":
-                        rows = len(elem.get("rows", []))
-                        print(f"[TABLE] ({rows} rows extracted)")
-                        
-            if output["warnings"]:
-                print(f"\nWarnings: {output['warnings']}")
-        else:
-            print(f"❌ Error: {output.get('error_message')}")
-
     asyncio.run(run_test())
