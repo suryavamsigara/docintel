@@ -163,19 +163,29 @@ def _validate_and_clean(raw: dict) -> dict:
     }
 
 
+def _element_to_text(el: dict) -> str:
+    """Converts any normalized document element back into an LLM-readable string."""
+    if "text" in el: return el["text"]
+    if "items" in el: return "\n".join(f"- {item}" for item in el["items"])
+    if "rows" in el:
+        lines = []
+        if el.get("headers"):
+            lines.append(" | ".join(str(h) for h in el["headers"]))
+            lines.append("-" * 20)
+        for row in el["rows"]:
+            lines.append(" | ".join(str(c) for c in row))
+        return "\n".join(lines)
+    return ""
+
 def run_classification_stage(doc_data: dict) -> dict:
     """
     Stage 1: Document classification + contextual metadata extraction via DeepSeek.
-
-    Reads up to the first 2 pages of the normalised document, sends the text
-    to DeepSeek in a single structured JSON call, validates the response,
-    and returns the pipeline-standard {stage, status, data} dict.
     """
     # Build working text from first 2 pages (preamble is always enough)
     working_text = ""
     for page in doc_data.get("pages", [])[:2]:
         for el in page.get("elements", []):
-            working_text += el.get("text", "") + "\n"
+            working_text += _element_to_text(el) + "\n\n"
 
     # 4000 chars is ~1000 tokens — covers any contract preamble comfortably
     working_text = working_text[:4000].strip()
@@ -203,7 +213,6 @@ def run_classification_stage(doc_data: dict) -> dict:
             "status": "error",
             "error": "Model returned malformed JSON. Raw response logged for debugging.",
         }
-
     except Exception as e:
         logger.error("Classification stage failed: %s", e, exc_info=True)
         return {

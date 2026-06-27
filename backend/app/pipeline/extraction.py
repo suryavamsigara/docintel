@@ -28,19 +28,40 @@ def _call_deepseek(system: str, user: str, max_tokens: int = 2500) -> dict:
     return json.loads(response.choices[0].message.content)
 
 
+def _element_to_text(el: dict) -> str:
+    """Converts any normalized document element back into an LLM-readable string."""
+    # Handle standard Paragraphs, Headings, and OcrText
+    if "text" in el:
+        return el["text"]
+        
+    # Handle ListGroups
+    if "items" in el:
+        return "\n".join(f"- {item}" for item in el["items"])
+        
+    # Handle Tables (Reconstruct as Markdown)
+    if "rows" in el:
+        lines = []
+        if el.get("headers"):
+            lines.append(" | ".join(str(h) for h in el["headers"]))
+            lines.append("-" * 20)
+        for row in el["rows"]:
+            lines.append(" | ".join(str(c) for c in row))
+        return "\n".join(lines)
+        
+    return ""
+
 def _build_text(doc_data: dict, max_chars: int = 12000) -> str:
     """
-    Concatenates all page elements into a single text string.
-    Uses more of the document than Stage 1 — clauses live anywhere,
-    not just the preamble.
+    Concatenates all page elements into a single text string, 
+    safely handling tables and lists.
     """
     parts = []
     for page in doc_data.get("pages", []):
         for el in page.get("elements", []):
-            t = el.get("text", "").strip()
+            t = _element_to_text(el).strip()
             if t:
                 parts.append(t)
-    return "\n".join(parts)[:max_chars]
+    return "\n\n".join(parts)[:max_chars]
 
 
 # ===========================================================================

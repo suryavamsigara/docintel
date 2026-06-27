@@ -49,9 +49,17 @@ async def run_full_pipeline(file: UploadFile, client_id: str):
         
         await ws_manager.emit_stage_update(client_id, "classification", "complete", data=classification_data, detail=f"Identified as {doc_type_formatted}.")
 
+        print("="*50)
+        print(classification_data)
+        print("="*50)
+
         # --- STAGE 3: EXTRACTION ---
         await ws_manager.emit_stage_update(client_id, "extraction", "running", detail=f"Applying targeted {doc_type_formatted} extraction schema...")
         ext_result = await asyncio.to_thread(run_extraction_stage, doc_data, classification_data)
+
+        print("="*50)
+        print(ext_result)
+        print("="*50)
         
         if ext_result.get("status") == "error":
             await ws_manager.emit_stage_update(client_id, "extraction", "error", error=ext_result.get("error"))
