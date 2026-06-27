@@ -1,6 +1,6 @@
 from app.pipeline.ingestion import run_ingestion_stage
 from app.pipeline.classification import run_classification_stage
-# from app.pipeline.extraction import run_extraction_stage
+from app.pipeline.extraction import run_extraction_stage
 
 
 # --- Local Testing Block ---
@@ -56,12 +56,12 @@ if __name__ == "__main__":
             print(classification_result['data'])
             print(f"\n============================================\n")
 
-            """
+            
             print("Running extraction..\n")
             ext_result = await asyncio.to_thread(run_extraction_stage, doc_data, classification_result["data"])
             print(ext_result['data'])
             print(f"\n============================================\n")
-            """
+            
 
                 
         except Exception as e:
