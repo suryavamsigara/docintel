@@ -1,25 +1,41 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from app.pipeline.stage1_ingestion import run_ingestion_stage
+import uuid
+import asyncio
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="Document Intelligence Platform")
+from app.websockets.manager import ws_manager
+from app.pipeline.orchestrator import run_full_pipeline
 
-@app.post("/api/documents/upload")
-async def upload_document(file: UploadFile = File(...)):
+app = FastAPI(title="Contract Intelligence API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.websocket("/ws/{client_id}")
+async def websocket_endpoint(websocket: WebSocket, client_id: str):
+    await ws_manager.connect(client_id, websocket)
+    try:
+        while True:
+            # Keep connection open, wait for client messages if any
+            _ = await websocket.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(client_id)
+
+@app.post("/api/upload")
+async def upload_document(background_tasks: BackgroundTasks, file: UploadFile = File(...), client_id: str = ""):
     """
-    Day 1 Endpoint: Uploads a document, identifies format, extracts text while 
-    preserving structure, and returns the normalized data.
+    Accepts the file upload and immediately returns a 202 Accepted.
+    The heavy lifting is pushed to a background task that communicates via WS.
     """
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="No file provided")
-    
-    # Run the Day 1 pipeline stage
-    result = await run_ingestion_stage(file)
-    
-    if result.get("status") == "error":
-        raise HTTPException(status_code=500, detail=result.get("error_message"))
+    if not client_id:
+        client_id = str(uuid.uuid4())
         
-    return result
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Kick off the pipeline in the background
+    background_tasks.add_task(run_full_pipeline, file, client_id)
+    
+    return {"message": "Processing started", "client_id": client_id}
