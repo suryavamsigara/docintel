@@ -27,7 +27,8 @@ class WebSocketManager:
         status: str, 
         data: dict = None, 
         error: str = None,
-        detail: str = None
+        detail: str = None,
+        duration: float = None # <-- Added duration here
     ):
         """
         Emits a standardised JSON payload to the React frontend.
@@ -40,12 +41,16 @@ class WebSocketManager:
             "stage": stage,
             "status": status,
         }
+        
+        # Append optional fields if they exist
         if data is not None:
             payload["data"] = data
         if error is not None:
             payload["error"] = error
         if detail is not None:
-            payload["detail"] = detail # <-- Append to payload
+            payload["detail"] = detail
+        if duration is not None:
+            payload["duration"] = duration # <-- Added to the payload
 
         try:
             websocket = self.active_connections[client_id]
