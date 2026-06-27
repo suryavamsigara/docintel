@@ -11,15 +11,9 @@ from app.pipeline.extraction import run_extraction_stage
 logger = logging.getLogger(__name__)
 
 async def run_full_pipeline(file: UploadFile, client_id: str):
-    """
-    Orchestrates the CPU-bound pipeline while ensuring real-time WebSocket 
-    emissions to the client at the start and end of every stage.
-    """
     try:
-        # ---------------------------------------------------------
-        # STAGE 1: INGESTION (Async native)
-        # ---------------------------------------------------------
-        await ws_manager.emit_stage_update(client_id, "ingestion", "running")
+        # --- STAGE 1: INGESTION ---
+        await ws_manager.emit_stage_update(client_id, "ingestion", "running", detail="Analysing file format and extracting layout...")
         ingestion_result = await run_ingestion_stage(file)
         
         if ingestion_result.get("status") == "error":
@@ -27,21 +21,23 @@ async def run_full_pipeline(file: UploadFile, client_id: str):
             return
             
         doc_data = ingestion_result["data"]
-        # Do not send the full text blob to UI to save bandwidth, just metadata
+        
+        # Build a safe preview string for the UI (first ~2000 chars)
+        preview_text = ""
+        for page in doc_data.get("pages", [])[:3]:
+            for el in page.get("elements", []):
+                preview_text += el.get("text", "") + "\n\n"
+        
         ui_doc_data = {
             "filename": ingestion_result["filename"],
             "pages_count": len(doc_data.get("pages", [])),
             "ocr_used": doc_data.get("ocr_used", False),
-            "low_quality": doc_data.get("low_quality", False)
+            "preview_text": preview_text.strip()[:2000] + ("..." if len(preview_text) > 2000 else "")
         }
-        await ws_manager.emit_stage_update(client_id, "ingestion", "complete", data=ui_doc_data)
+        await ws_manager.emit_stage_update(client_id, "ingestion", "complete", data=ui_doc_data, detail="Document parsed successfully.")
 
-        # ---------------------------------------------------------
-        # STAGE 2: CLASSIFICATION (CPU-bound / Network-bound blocking)
-        # ---------------------------------------------------------
-        await ws_manager.emit_stage_update(client_id, "classification", "running")
-        
-        # Offload blocking synchronous API calls to thread pool
+        # --- STAGE 2: CLASSIFICATION ---
+        await ws_manager.emit_stage_update(client_id, "classification", "running", detail="Running LLM classification heuristics...")
         class_result = await asyncio.to_thread(run_classification_stage, doc_data)
         
         if class_result.get("status") == "error":
@@ -49,23 +45,21 @@ async def run_full_pipeline(file: UploadFile, client_id: str):
             return
             
         classification_data = class_result["data"]
-        await ws_manager.emit_stage_update(client_id, "classification", "complete", data=classification_data)
-
-        # ---------------------------------------------------------
-        # STAGE 3: EXTRACTION (CPU-bound / Network-bound blocking)
-        # ---------------------------------------------------------
-        await ws_manager.emit_stage_update(client_id, "extraction", "running")
+        doc_type_formatted = classification_data.get('document_type', 'unknown').replace('_', ' ').title()
         
+        await ws_manager.emit_stage_update(client_id, "classification", "complete", data=classification_data, detail=f"Identified as {doc_type_formatted}.")
+
+        # --- STAGE 3: EXTRACTION ---
+        await ws_manager.emit_stage_update(client_id, "extraction", "running", detail=f"Applying targeted {doc_type_formatted} extraction schema...")
         ext_result = await asyncio.to_thread(run_extraction_stage, doc_data, classification_data)
         
         if ext_result.get("status") == "error":
             await ws_manager.emit_stage_update(client_id, "extraction", "error", error=ext_result.get("error"))
             return
             
-        await ws_manager.emit_stage_update(client_id, "extraction", "complete", data=ext_result["data"])
+        await ws_manager.emit_stage_update(client_id, "extraction", "complete", data=ext_result["data"], detail="Structured entities and clauses extracted.")
 
-        # Note: Further stages (Anomaly, Risk, CRM Sync, Cross-Contradiction) 
-        # follow this exact same pattern.
+        # Pipeline continues for Anomaly & Risk...
         
     except Exception as e:
         logger.error(f"Pipeline orchestrator failed: {traceback.format_exc()}")

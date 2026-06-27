@@ -20,7 +20,15 @@ class WebSocketManager:
             del self.active_connections[client_id]
             logger.info(f"WebSocket disconnected: {client_id}")
 
-    async def emit_stage_update(self, client_id: str, stage: str, status: str, data: dict = None, error: str = None):
+    async def emit_stage_update(
+        self, 
+        client_id: str, 
+        stage: str, 
+        status: str, 
+        data: dict = None, 
+        error: str = None,
+        detail: str = None
+    ):
         """
         Emits a standardised JSON payload to the React frontend.
         status: "running" | "complete" | "error"
@@ -36,6 +44,8 @@ class WebSocketManager:
             payload["data"] = data
         if error is not None:
             payload["error"] = error
+        if detail is not None:
+            payload["detail"] = detail # <-- Append to payload
 
         try:
             websocket = self.active_connections[client_id]
