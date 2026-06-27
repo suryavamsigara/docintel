@@ -82,6 +82,10 @@ async def run_full_pipeline(file: UploadFile, client_id: str):
         doc_type_formatted = classification_data.get('document_type', 'unknown').replace('_', ' ').title()
         await ws_manager.emit_stage_update(client_id, "classification", "complete", data=classification_data, detail=f"Identified {doc_type_formatted} in {duration}s", duration=duration)
 
+        print("="*50)
+        print(classification_data)
+        print("="*50)
+
         # --- STAGE 3: EXTRACTION ---
         t0 = time.time()
         await ws_manager.emit_stage_update(client_id, "extraction", "running", detail="Extracting clauses...")
@@ -98,7 +102,11 @@ async def run_full_pipeline(file: UploadFile, client_id: str):
         total_time = round(time.time() - pipeline_start, 1)
         
         # We can pass total_time in the extraction data payload for the Overview card
-        ext_data["processing_time"] = total_time 
+        ext_data["processing_time"] = total_time
+
+        print("="*50)
+        print(ext_data)
+        print("="*50)
         
         await ws_manager.emit_stage_update(client_id, "extraction", "complete", data=ext_data, detail=f"Extracted in {duration}s", duration=duration)
 
