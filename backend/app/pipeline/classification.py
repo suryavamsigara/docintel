@@ -4,26 +4,12 @@ Uses DeepSeek (OpenAI-compatible API) for all intelligence.
 No local ML models are loaded in this stage.
 """
 
-import os
 import json
 import logging
-from openai import OpenAI
+
+from app.openai_client import _get_client
 
 logger = logging.getLogger(__name__)
-
-_client: OpenAI | None = None
-
-def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        api_key = os.environ.get("DEEPSEEK_API_KEY")
-        if not api_key:
-            raise RuntimeError("DEEPSEEK_API_KEY environment variable is not set.")
-        _client = OpenAI(
-            api_key=api_key,
-            base_url="https://api.deepseek.com",
-        )
-    return _client
 
 
 _SYSTEM_PROMPT = """You are a legal and financial document analyst.
