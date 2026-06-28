@@ -156,6 +156,10 @@ async def run_full_pipeline(
             duration=round(time.time() - t0, 1),
         )
 
+        print("="*50)
+        print(doc_data)
+        print("="*50)
+
         # ── STAGE 2: CLASSIFICATION ───────────────────────────────────────
         t0 = time.time()
         mode_label = "🤖 AI" if mode == "llm" else "⚡ Local"

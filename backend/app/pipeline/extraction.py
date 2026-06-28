@@ -219,7 +219,7 @@ Return a JSON object with this exact structure:
   "clauses": [
     {{
       "clause_type": string — one of the types listed below,
-      "present": boolean,
+      "status": string — strictly one of: ["present", "missing", "explicitly_waived"],
       "value": string | null — the specific value, duration, or scope extracted verbatim-ish,
       "raw_text": string | null — exact source sentence (max 300 chars),
       "notes": string | null — qualifications or exceptions worth noting
@@ -258,6 +258,8 @@ def _validate_nda(raw: dict) -> dict:
         "non_solicitation", "remedies", "term", "notice_period",
         "dispute_resolution", "assignment",
     }
+    valid_statuses = {"present", "missing", "explicitly_waived"}
+    
     clauses = []
     seen_types: set[str] = set()
     for c in raw.get("clauses") or []:
@@ -267,16 +269,25 @@ def _validate_nda(raw: dict) -> dict:
         if ct not in valid_clause_types or ct in seen_types:
             continue
         seen_types.add(ct)
+
+        raw_status = str(c.get("status", "missing")).lower()
+        if raw_status in valid_statuses:
+            status = raw_status
+        else:
+            if str(c.get("present")).lower() == "true": status = "present"
+            elif str(c.get("present")).lower() == "false": status = "missing"
+            else: status = "missing"
+
         clauses.append({
             "clause_type": ct,
-            "present":  bool(c.get("present", False)),
+            "status":      status,
             "value":    str(c["value"])[:500]    if c.get("value")    else None,
             "raw_text": str(c["raw_text"])[:300] if c.get("raw_text") else None,
             "notes":    str(c["notes"])[:300]    if c.get("notes")    else None,
         })
     for ct in valid_clause_types:
         if ct not in seen_types:
-            clauses.append({"clause_type": ct, "present": False,
+            clauses.append({"clause_type": ct, "status": "missing",
                             "value": None, "raw_text": None, "notes": None})
     return {
         "clauses":      clauses,
