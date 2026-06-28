@@ -25,6 +25,7 @@ import logging
 import time
 import traceback
 from typing import Literal
+import json
 
 from fastapi import UploadFile
 
@@ -45,6 +46,9 @@ from app.pipeline.anomaly_local        import run_anomaly_stage_local        as 
 
 # ── Risk scoring (pure rule-based, same for both modes) ───────────────────
 from app.pipeline.risk import run_risk_stage
+
+from app.db import get_client
+
 
 ProcessingMode = Literal["local", "llm"]
 
@@ -279,9 +283,35 @@ async def run_full_pipeline(
         print(risk_data)
         print("="*50)
 
+        # =======================================
+        # SAVE FINAL RESULTS TO TURSO DATABASE
+        # =======================================
+        final_stages = {
+            "ingestion": {"status": "complete", "data": doc_data},
+            "classification": {"status": "complete", "data": classification_data},
+            "extraction": {"status": "complete", "data": ext_data},
+            "anomaly": {"status": "complete", "data": anom_data},
+            "risk": {"status": "complete", "data": risk_data}
+        }
+        
+        client = get_client()
+        await client.execute(
+            "UPDATE documents SET status = 'completed', analysis_data = ? WHERE id = ?",
+            [json.dumps(final_stages), client_id] # Note: client_id is used as doc_id in main.py
+        )
+
     except Exception as e:
         logger.error("Pipeline orchestrator failed: %s", traceback.format_exc())
         await ws_manager.emit_stage_update(
             client_id, "system", "error",
             error=f"Fatal pipeline error: {str(e)}",
         )
+
+        try:
+            client = get_client()
+            await client.execute(
+                "UPDATE documents SET status = 'failed' WHERE id = ?",
+                [client_id]
+            )
+        except Exception as db_err:
+            logger.error(f"Failed to update DB error state: {db_err}")

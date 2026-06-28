@@ -1,23 +1,92 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { FileText, UploadCloud, Loader2, CheckCircle2, ChevronRight, Cpu, Sparkles } from 'lucide-react';
 
-export default function ProjectDetail({ project, documents, onUpload, onOpenDoc }) {
+export default function ProjectDetail() {
+  const { projectId } = useParams();
+  const navigate = useNavigate();
+  
+  const [project, setProject] = useState(null);
+  const [documents, setDocuments] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
-  // ADDED: State to track selected processing mode
   const [processingMode, setProcessingMode] = useState('local');
+
+  const fetchDocuments = useCallback(async () => {
+    try {
+      const docsRes = await fetch(`http://localhost:8000/api/projects/${projectId}/documents`);
+      if (docsRes.ok) setDocuments(await docsRes.json());
+    } catch (err) {
+      console.error("Failed to fetch documents", err);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    const loadProject = async () => {
+      try {
+        const projRes = await fetch(`http://localhost:8000/api/projects/${projectId}`);
+        if (projRes.ok) setProject(await projRes.json());
+        await fetchDocuments();
+      } catch (err) {
+        console.error("Failed to load project", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadProject();
+  }, [projectId, fetchDocuments]);
+
+  // NEW: Polling mechanism. If any document is 'processing', refresh the list every 3 seconds
+  useEffect(() => {
+    let interval;
+    const hasProcessing = documents.some(doc => doc.status === 'processing');
+    if (hasProcessing) {
+      interval = setInterval(() => {
+        fetchDocuments();
+      }, 3000);
+    }
+    return () => clearInterval(interval);
+  }, [documents, fetchDocuments]);
+
+  const handleUpload = async (file, mode) => {
+    if (!file) return;
+    
+    // 1. Optimistic UI update so the user immediately sees it in the list
+    const tempId = Math.random().toString(36).substring(7);
+    setDocuments(prev => [{ id: tempId, name: file.name, status: 'processing' }, ...prev]);
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('project_id', projectId);
+
+    try {
+      await fetch('http://localhost:8000/api/upload', {
+        method: 'POST',
+        headers: { 'X-Processing-Mode': mode },
+        body: formData,
+      });
+      // 2. Fetch immediately to get the real Database ID
+      fetchDocuments();
+      // NOTE: We intentionally removed the navigate() call here!
+    } catch (err) {
+      console.error('Upload failed:', err);
+    }
+  };
 
   const handleDrop = (e) => {
     e.preventDefault();
     setIsDragging(false);
-    // Pass the mode up on drop
-    if (e.dataTransfer.files?.length) onUpload(e.dataTransfer.files[0], processingMode);
+    if (e.dataTransfer.files?.length) handleUpload(e.dataTransfer.files[0], processingMode);
   };
+
+  if (loading) return <div className="p-12 text-center text-gray-500 flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading project...</div>;
+  if (!project) return <div className="p-12 text-center text-rose-500 font-bold">Project not found.</div>;
 
   return (
     <div className="max-w-5xl mx-auto p-8">
       <h1 className="text-3xl font-bold tracking-tight mb-8">{project.name}</h1>
 
-      {/* Document List (Unchanged) */}
+      {/* Document List */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden mb-12">
         {documents.length === 0 ? (
           <div className="p-12 text-center text-gray-500">No documents in this project yet.</div>
@@ -26,14 +95,13 @@ export default function ProjectDetail({ project, documents, onUpload, onOpenDoc 
             {documents.map(doc => (
               <button 
                 key={doc.id} 
-                onClick={() => onOpenDoc(doc.id)}
+                onClick={() => navigate(`/document/${doc.id}`)}
                 className="w-full text-left p-4 hover:bg-gray-50 flex items-center justify-between transition-colors group"
               >
                 <div className="flex items-center space-x-4">
                   <FileText className="w-8 h-8 text-blue-500 p-1.5 bg-blue-50 rounded-lg" />
                   <div>
                     <h4 className="font-medium text-gray-900">{doc.name}</h4>
-                    <p className="text-xs text-gray-500">{(doc.size / 1024 / 1024).toFixed(2)} MB</p>
                   </div>
                 </div>
                 
@@ -61,16 +129,12 @@ export default function ProjectDetail({ project, documents, onUpload, onOpenDoc 
 
       {/* Upload Section */}
       <div className="max-w-2xl mx-auto">
-        
-        {/* NEW: Segmented Control for Engine Selection */}
         <div className="flex items-center justify-center mb-6">
           <div className="bg-gray-100/80 p-1 rounded-xl flex space-x-1 border border-gray-200/60 shadow-inner">
             <button
               onClick={() => setProcessingMode('local')}
               className={`flex items-center px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-200 ${
-                processingMode === 'local' 
-                  ? 'bg-white text-gray-900 shadow-sm border border-gray-200/50' 
-                  : 'text-gray-500 hover:text-gray-700'
+                processingMode === 'local' ? 'bg-white text-gray-900 shadow-sm border border-gray-200/50' : 'text-gray-500 hover:text-gray-700'
               }`}
             >
               <Cpu className={`w-4 h-4 mr-2 ${processingMode === 'local' ? 'text-blue-600' : ''}`} />
@@ -79,9 +143,7 @@ export default function ProjectDetail({ project, documents, onUpload, onOpenDoc 
             <button
               onClick={() => setProcessingMode('llm')}
               className={`flex items-center px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-200 ${
-                processingMode === 'llm' 
-                  ? 'bg-white text-gray-900 shadow-sm border border-gray-200/50' 
-                  : 'text-gray-500 hover:text-gray-700'
+                processingMode === 'llm' ? 'bg-white text-gray-900 shadow-sm border border-gray-200/50' : 'text-gray-500 hover:text-gray-700'
               }`}
             >
               <Sparkles className={`w-4 h-4 mr-2 ${processingMode === 'llm' ? 'text-indigo-600' : ''}`} />
@@ -90,7 +152,6 @@ export default function ProjectDetail({ project, documents, onUpload, onOpenDoc 
           </div>
         </div>
 
-        {/* Updated Dropzone to pass processingMode onChange */}
         <label 
           onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
           onDragLeave={() => setIsDragging(false)}
@@ -101,17 +162,10 @@ export default function ProjectDetail({ project, documents, onUpload, onOpenDoc 
         >
           <UploadCloud className={`w-8 h-8 mb-3 ${isDragging ? 'text-blue-500' : 'text-gray-400'}`} />
           <span className="text-sm font-medium text-gray-700">Add Document to Project</span>
-          <span className="text-xs text-gray-400 mt-1">
-            Using {processingMode === 'local' ? 'deterministic NLP (Faster)' : 'generative AI (Smarter)'}
-          </span>
-          <input 
-            type="file" 
-            className="hidden" 
-            onChange={(e) => onUpload(e.target.files[0], processingMode)} 
-          />
+          <span className="text-xs text-gray-400 mt-1">Using {processingMode === 'local' ? 'deterministic NLP (Faster)' : 'generative AI (Smarter)'}</span>
+          <input type="file" className="hidden" onChange={(e) => handleUpload(e.target.files[0], processingMode)} />
         </label>
       </div>
-
     </div>
   );
 }

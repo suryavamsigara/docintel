@@ -1,74 +1,58 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Link, useParams } from 'react-router-dom';
 import { Database, ChevronRight } from 'lucide-react';
-import { useProjectStore } from './hooks/useProjectStore';
 import ProjectsList from './views/ProjectsList';
 import ProjectDetail from './views/ProjectDetail';
 import DocumentWorkspace from './views/DocumentWorkspace';
 
-export default function App() {
-  const store = useProjectStore();
+// A dynamic breadcrumb component based on route
+function Breadcrumbs() {
+  const { projectId, docId } = useParams();
   
-  // View routing state: 'PROJECTS', 'PROJECT_DETAIL', 'WORKSPACE'
-  const [currentView, setCurrentView] = useState('PROJECTS');
-  const [activeProjectId, setActiveProjectId] = useState(null);
-  const [activeDocId, setActiveDocId] = useState(null);
-
-  const activeProject = store.projects.find(p => p.id === activeProjectId);
-  const activeDocument = store.documents[activeDocId];
-
   return (
-    <div className="min-h-screen bg-[#F5F5F7] font-sans text-gray-900 selection:bg-blue-500 selection:text-white flex flex-col">
-      {/* Top Navbar & Breadcrumbs */}
-      <nav className="bg-white/80 backdrop-blur-md border-b border-gray-200 sticky top-0 z-50 shadow-sm h-14 flex items-center px-6 shrink-0">
-        <div className="flex items-center space-x-2 text-sm font-medium">
-          <button onClick={() => setCurrentView('PROJECTS')} className="flex items-center text-gray-900 hover:text-blue-600 transition-colors">
-            <Database className="w-4 h-4 mr-2" /> Projects
-          </button>
-          
-          {activeProject && currentView !== 'PROJECTS' && (
-            <>
-              <ChevronRight className="w-4 h-4 text-gray-400" />
-              <button 
-                onClick={() => setCurrentView('PROJECT_DETAIL')}
-                className={`transition-colors ${currentView === 'PROJECT_DETAIL' ? 'text-gray-900' : 'text-gray-500 hover:text-blue-600'}`}
-              >
-                {activeProject.name}
-              </button>
-            </>
-          )}
-
-          {activeDocument && currentView === 'WORKSPACE' && (
-            <>
-              <ChevronRight className="w-4 h-4 text-gray-400" />
-              <span className="text-gray-500 truncate max-w-xs">{activeDocument.name}</span>
-            </>
-          )}
-        </div>
-      </nav>
-
-      {/* Main Content Area */}
-      <main className="flex-1 overflow-hidden relative">
-        {currentView === 'PROJECTS' && (
-          <ProjectsList 
-            projects={store.projects} 
-            onOpenProject={(id) => { setActiveProjectId(id); setCurrentView('PROJECT_DETAIL'); }} 
-          />
-        )}
+    <nav className="bg-white/80 backdrop-blur-md border-b border-gray-200 sticky top-0 z-50 shadow-sm h-14 flex items-center px-6 shrink-0">
+      <div className="flex items-center space-x-2 text-sm font-medium">
+        <Link to="/" className="flex items-center text-gray-900 hover:text-blue-600 transition-colors">
+          <Database className="w-4 h-4 mr-2" /> Projects
+        </Link>
         
-        {currentView === 'PROJECT_DETAIL' && (
-          <ProjectDetail 
-            project={activeProject}
-            documents={Object.values(store.documents).filter(d => d.projectId === activeProject.id)}
-            // UPDATE THIS LINE TO PASS MODE:
-            onUpload={(file, mode) => store.uploadDocument(activeProject.id, file, mode)}
-            onOpenDoc={(id) => { setActiveDocId(id); setCurrentView('WORKSPACE'); }}
-          />
+        {projectId && (
+          <>
+            <ChevronRight className="w-4 h-4 text-gray-400" />
+            <Link to={`/project/${projectId}`} className="text-gray-500 hover:text-blue-600 transition-colors">
+              Project Details
+            </Link>
+          </>
         )}
 
-        {currentView === 'WORKSPACE' && (
-          <DocumentWorkspace document={activeDocument} />
+        {docId && (
+          <>
+            <ChevronRight className="w-4 h-4 text-gray-400" />
+            <span className="text-gray-400">Analysis</span>
+          </>
         )}
-      </main>
-    </div>
+      </div>
+    </nav>
+  );
+}
+
+export default function App() {
+  return (
+    <Router>
+      <div className="min-h-screen bg-[#F5F5F7] font-sans text-gray-900 flex flex-col">
+        {/* We use a wildcard route just to grab the params for the Breadcrumbs */}
+        <Routes>
+          <Route path="/*" element={<Breadcrumbs />} />
+        </Routes>
+
+        <main className="flex-1 overflow-hidden relative">
+          <Routes>
+            <Route path="/" element={<ProjectsList />} />
+            <Route path="/project/:projectId" element={<ProjectDetail />} />
+            <Route path="/document/:docId" element={<DocumentWorkspace />} />
+          </Routes>
+        </main>
+      </div>
+    </Router>
   );
 }

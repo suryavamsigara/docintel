@@ -1,11 +1,14 @@
 import uuid
+import json
 import asyncio
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, BackgroundTasks, Header
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, BackgroundTasks, Header, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Literal
 
 from app.websockets.manager import ws_manager
 from app.pipeline.orchestrator_mode_aware import run_full_pipeline
+# FIX: Import get_client instead of the raw client
+from app.db import init_db, get_client, generate_id 
 
 app = FastAPI(title="Contract Intelligence API")
 
@@ -16,6 +19,78 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.on_event("startup")
+async def startup_event():
+    # This runs safely inside the event loop!
+    await init_db()
+
+@app.get("/api/projects/{project_id}")
+async def get_project(project_id: str):
+    client = get_client()
+    result = await client.execute("SELECT id, name, created_at FROM projects WHERE id = ?", [project_id])
+    if not result.rows:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    row = result.rows[0]
+    # FIX: Use bracket notation
+    return {"id": row["id"], "name": row["name"], "created_at": row["created_at"]}
+
+@app.post("/api/projects")
+async def create_project(name: str = Form(...)):
+    if not name.strip():
+        raise HTTPException(status_code=400, detail="Project name required")
+    
+    client = get_client()
+    project_id = generate_id("proj")
+    await client.execute("INSERT INTO projects (id, name) VALUES (?, ?)", [project_id, name])
+    return {"id": project_id, "name": name, "docCount": 0}
+
+@app.get("/api/projects/{project_id}/documents")
+async def get_project_documents(project_id: str):
+    client = get_client()
+    result = await client.execute(
+        "SELECT id, name, status, created_at FROM documents WHERE project_id = ? ORDER BY created_at DESC", 
+        [project_id]
+    )
+    # FIX: Use bracket notation
+    return [
+        {
+            "id": r["id"], 
+            "name": r["name"], 
+            "status": r["status"], 
+            "created_at": r["created_at"]
+        } 
+        for r in result.rows
+    ]
+
+@app.get("/api/documents/{doc_id}")
+async def get_document(doc_id: str):
+    client = get_client()
+    result = await client.execute(
+        "SELECT id, name, status, file_url, analysis_data FROM documents WHERE id = ?", 
+        [doc_id]
+    )
+    if not result.rows:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    row = result.rows[0]
+    
+    # Parse final analysis data if the document is already completed
+    stages = None
+    if row["analysis_data"]:
+        try:
+            stages = json.loads(row["analysis_data"])
+        except:
+            pass
+            
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "status": row["status"],
+        "fileUrl": row["file_url"],
+        "stages": stages
+    }
 
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
@@ -30,20 +105,45 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    client_id: str = "",
+    project_id: str = Form(...),
+    client_id: str = Form(None), 
     x_processing_mode: Literal["local", "llm"] = Header(default="local"),
 ):
-    """
-    Accepts the file upload and immediately returns a 202 Accepted.
-    The heavy lifting is pushed to a background task that communicates via WS.
-
-    Headers:
-        X-Processing-Mode: local (default) | llm
-    """
     if not client_id:
-        client_id = str(uuid.uuid4())
+        client_id = generate_id("doc")
+        
+    doc_id = client_id 
+    client = get_client()
+    
+    # 1. Save document record to Turso
+    await client.execute(
+        "INSERT INTO documents (id, project_id, name, status) VALUES (?, ?, ?, ?)",
+        [doc_id, project_id, file.filename, "processing"]
+    )
 
+    # 2. Start Background task
     mode = x_processing_mode if x_processing_mode in ("local", "llm") else "local"
     background_tasks.add_task(run_full_pipeline, file, client_id, mode)
 
-    return {"message": "Processing started", "client_id": client_id, "mode": mode}
+    return {"message": "Processing started", "doc_id": doc_id, "mode": mode}
+
+
+@app.get("/api/projects")
+async def get_projects():
+    client = get_client()
+    result = await client.execute("SELECT id, name, created_at FROM projects ORDER BY created_at DESC")
+    counts = await client.execute("SELECT project_id, COUNT(*) as count FROM documents GROUP BY project_id")
+    
+    # FIX: Use bracket notation for the counts
+    count_map = {row["project_id"]: row["count"] for row in counts.rows}
+    
+    projects = []
+    for row in result.rows:
+        projects.append({
+            # FIX: Use bracket notation for the rows
+            "id": row["id"],
+            "name": row["name"],
+            "created_at": row["created_at"],
+            "docCount": count_map.get(row["id"], 0)
+        })
+    return projects
