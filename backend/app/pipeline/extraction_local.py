@@ -87,9 +87,9 @@ def _build_structured_elements(doc_data: dict) -> list[dict]:
 
 # Money: "$1,200,000", "£2M", "USD 500,000", "€1.5 million"
 _RE_MONEY = re.compile(
-    r"(?:USD|GBP|EUR|£|\$|€)\s*[\d,]+(?:\.\d{1,2})?(?:\s*(?:million|m|k|thousand))?"
-    r"|[\d,]+(?:\.\d{1,2})?\s*(?:USD|GBP|EUR|dollars?|pounds?|euros?)"
-    r"(?:\s*(?:million|m|k|thousand))?",
+    r"(?:USD|GBP|EUR|INR|£|\$|€|₹)\s*[\d,]+(?:\.\d{1,2})?(?:\s*(?:million|m|k|thousand|lakh|lakhs|crore|crores))?"
+    r"|[\d,]+(?:\.\d{1,2})?\s*(?:USD|GBP|EUR|INR|dollars?|pounds?|euros?|rupees?)"
+    r"(?:\s*(?:million|m|k|thousand|lakh|lakhs|crore|crores))?",
     re.IGNORECASE,
 )
 

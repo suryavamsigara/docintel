@@ -237,7 +237,8 @@ def _classify_document(text: str) -> tuple[str, float]:
     Returns (predicted_class, confidence_score 0-1).
     Confidence is the cosine similarity of the top class.
     """
-    doc_vec = _embed([text])            # (1, 384)
+    truncated_text = text[:1500]
+    doc_vec = _embed([truncated_text])            # (1, 384)
     labels, proto_matrix = _build_prototype_matrix()
 
     scores = (proto_matrix @ doc_vec.T).flatten()  # (num_classes,)
