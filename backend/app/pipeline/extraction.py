@@ -78,14 +78,10 @@ Return a JSON object with this exact structure:
   "clauses": [
     {{
       "clause_type": string — one of the standard types listed below,
-      "present": boolean — true if this clause exists in the document,
-      "value": string | null — the specific extracted value, amount, duration, or condition.
-        Be precise: "Net 30 days from invoice date", "£2,000,000 per occurrence", "12 months".
-        null if the clause is absent.
-      "raw_text": string | null — the exact sentence or short paragraph from the document
-        that contains this clause (max 300 chars). null if absent.
-      "notes": string | null — any unusual conditions, exceptions, or qualifications
-        on this clause worth flagging (e.g. "Cap excludes gross negligence"). null if none.
+      "status": string — strictly one of: ["present", "missing", "explicitly_waived"]. Use "explicitly_waived" ONLY if the text explicitly states the clause does not apply or is omitted (e.g. "This agreement does not contain a non-compete").
+      "value": string | null — the specific extracted value, amount, duration, or condition. null if missing.
+      "raw_text": string | null — the exact sentence from the document (max 300 chars). null if missing.
+      "notes": string | null — exceptions or qualifications.
     }}
   ],
   "governing_law": string | null,
@@ -130,37 +126,83 @@ def _validate_contract(raw: dict) -> dict:
         "warranty", "force_majeure", "dispute_resolution", "assignment",
         "entire_agreement",
     }
+    valid_statuses = {"present", "missing", "explicitly_waived"}
+
     clauses = []
     seen_types: set[str] = set()
+    
+    # 1. Parse Clauses
     for c in raw.get("clauses") or []:
         if not isinstance(c, dict):
             continue
+            
         ct = c.get("clause_type", "")
-        if ct not in valid_clause_types:
+        if ct not in valid_clause_types or ct in seen_types:
             continue
-        if ct in seen_types:
-            continue
+            
         seen_types.add(ct)
+        
+        # Safely handle the new status enum
+        raw_status = str(c.get("status", "missing")).lower()
+        if raw_status in valid_statuses:
+            status = raw_status
+        else:
+            # Fallback just in case the LLM hallucinates a boolean or old format
+            if raw_status == "true": status = "present"
+            elif raw_status == "false": status = "missing"
+            else: status = "missing"
+
         clauses.append({
             "clause_type": ct,
-            "present":    bool(c.get("present", False)),
-            "value":      str(c["value"])[:500]   if c.get("value")    else None,
-            "raw_text":   str(c["raw_text"])[:300] if c.get("raw_text") else None,
-            "notes":      str(c["notes"])[:300]    if c.get("notes")    else None,
+            "status":      status,
+            "value":       str(c["value"])[:500]    if c.get("value")    else None,
+            "raw_text":    str(c["raw_text"])[:300] if c.get("raw_text") else None,
+            "notes":       str(c["notes"])[:300]    if c.get("notes")    else None,
         })
 
-    # Ensure all standard types are represented even if model omitted them
+    # Ensure all standard types are represented even if the model omitted them
     for ct in valid_clause_types:
         if ct not in seen_types:
-            clauses.append({"clause_type": ct, "present": False,
-                            "value": None, "raw_text": None, "notes": None})
+            clauses.append({
+                "clause_type": ct, 
+                "status": "missing",
+                "value": None, 
+                "raw_text": None, 
+                "notes": None
+            })
+
+    # 2. Parse Milestones
+    def _num(v) -> float | None:
+        try:
+            # Handle cases where the LLM might return "$75,000" instead of 75000
+            if isinstance(v, str):
+                v = v.replace('$', '').replace(',', '').strip()
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    milestones = []
+    for m in raw.get("milestones") or []:
+        if not isinstance(m, dict):
+            continue
+        # Ensure we have at least a name or description to consider it a valid milestone
+        if not m.get("name") and not m.get("description"):
+            continue
+            
+        milestones.append({
+            "name":        str(m.get("name", ""))[:100] if m.get("name") else None,
+            "description": str(m.get("description", ""))[:300] if m.get("description") else None,
+            "due_date":    str(m.get("due_date", ""))[:100] if m.get("due_date") else None,
+            "amount":      _num(m.get("amount")),
+        })
 
     return {
         "clauses":        clauses,
+        "milestones":     milestones,
         "governing_law":  str(raw["governing_law"])[:200]  if raw.get("governing_law")  else None,
         "contract_term":  str(raw["contract_term"])[:200]  if raw.get("contract_term")  else None,
-        "auto_renewal":   bool(raw["auto_renewal"])         if raw.get("auto_renewal") is not None else None,
-        "signed":         bool(raw["signed"])               if raw.get("signed")        is not None else None,
+        "auto_renewal":   bool(raw["auto_renewal"])        if raw.get("auto_renewal") is not None else None,
+        "signed":         bool(raw["signed"])              if raw.get("signed")       is not None else None,
     }
 
 

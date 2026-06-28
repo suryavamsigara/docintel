@@ -1,3 +1,4 @@
+import re
 import asyncio
 import logging
 import traceback
@@ -13,15 +14,23 @@ from app.pipeline.risk import run_risk_stage
 
 logger = logging.getLogger(__name__)
 
+def _normalize_text(text: str) -> str:
+    """Removes all non-alphanumeric chars and spaces for robust matching."""
+    return re.sub(r'[^a-z0-9]', '', text.lower())
+
 def _find_page(pages: list, text_to_find: str) -> int:
-    """Helper to locate the page number for a given snippet of text."""
+    """Helper to locate the page number using normalized text matching."""
     if not text_to_find: return None
-    search_target = text_to_find.lower().strip()[:60] # Search using first 60 chars
+    
+    # Grab the first 50 chars of the text, normalized
+    search_target = _normalize_text(text_to_find)[:50] 
+    if not search_target: return None
     
     for page in pages:
-        # Build page text
-        page_text = " ".join([el.get("text", "") for el in page.get("elements", [])]).lower()
-        if search_target in page_text:
+        page_text = " ".join([el.get("text", "") for el in page.get("elements", [])])
+        normalized_page_text = _normalize_text(page_text)
+        
+        if search_target in normalized_page_text:
             return page.get("number", 1)
     return None
 

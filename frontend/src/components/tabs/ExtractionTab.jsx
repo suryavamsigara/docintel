@@ -21,8 +21,9 @@ export default function ExtractionTab({ data, onJump, filter }) {
   // LAYOUT 1: CONTRACTS & NDAs
   // ---------------------------------------------------------
   if (doc_type === 'contract' || doc_type === 'nda') {
-    let present = extraction.clauses?.filter(c => c.present) || [];
-    let missing = extraction.clauses?.filter(c => !c.present) || [];
+    let present = extraction.clauses?.filter(c => c.status === 'present') || [];
+    let missing = extraction.clauses?.filter(c => c.status === 'missing') || [];
+    let waived = extraction.clauses?.filter(c => c.status === 'explicitly_waived') || [];
 
     if (filter) {
       const f = filter.toLowerCase();
@@ -63,6 +64,20 @@ export default function ExtractionTab({ data, onJump, filter }) {
               ))}
             </div>
           </div>
+        )}
+
+        {waived.length > 0 && (
+        <div className="mt-6">
+            <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 border-b pb-2">Explicitly Waived Clauses</h3>
+            <div className="flex flex-wrap gap-2">
+            {waived.map((c, i) => (
+                <div key={i} className="inline-flex items-center bg-gray-50 border border-gray-200 px-3 py-1.5 rounded-lg text-sm text-gray-500 shadow-sm">
+                <span className="w-2 h-2 rounded-full bg-gray-400 mr-2"></span>
+                <span className="capitalize line-through opacity-70">{c.clause_type.replace(/_/g, ' ')}</span>
+                </div>
+            ))}
+            </div>
+        </div>
         )}
       </div>
     );

@@ -10,12 +10,12 @@ def run_risk_stage(anomaly_data: dict, ext_data: dict) -> dict:
         
         # Base risk depends on document type
         base_scores = {
-            "contract": 20,
-            "nda": 15,
-            "invoice": 10,
-            "financial_statement": 15,
-            "rfp": 10,
-            "other": 10
+            "contract": 15,
+            "nda": 10,
+            "invoice": 5,
+            "financial_statement": 10,
+            "rfp": 5,
+            "other": 5
         }
         
         overall_score = base_scores.get(doc_type, 10)
@@ -29,29 +29,36 @@ def run_risk_stage(anomaly_data: dict, ext_data: dict) -> dict:
         
         # Weighting
         weights = {
-            "critical": 25,
-            "warning": 10,
-            "informational": 3
+            "critical": 15,
+            "warning": 5,
+            "informational": 1
         }
         
+        # Calculate raw penalty
+        penalty_score = 0
         for anomaly in anomalies:
             sev = anomaly.get("severity", "informational").lower()
             cat = anomaly.get("category", "Operational")
-            points = weights.get(sev, 3)
+            points = weights.get(sev, 1)
             
-            overall_score += points
+            penalty_score += points
             if cat in category_breakdown:
                 category_breakdown[cat] += points
             else:
                 category_breakdown["Operational"] += points
                 
-        # Cap score at 100
+        # Calculate final score (Starts at 0 risk, adds penalties, asymptotes at 100)
+        # Using a simple curve: Score = 100 * (1 - (0.98 ^ penalty_score))
+        # This means 1 critical (15 pts) = ~53/100. 4 criticals (60 pts) = ~95/100.
+        overall_score = int(100 * (1 - (0.98 ** penalty_score)))
+        
+        overall_score = max(overall_score, base_scores.get(doc_type, 5))
         overall_score = min(100, overall_score)
         
         # Determine level
-        if overall_score < 35:
+        if overall_score < 40:
             level = "Low"
-        elif overall_score < 70:
+        elif overall_score < 75:
             level = "Medium"
         else:
             level = "High"
