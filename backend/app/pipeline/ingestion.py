@@ -53,7 +53,7 @@ async def run_ingestion_stage(file: UploadFile) -> Dict[str, Any]:
         await file.close()
         del content
 
-
+"""
 # --- Local Testing Block ---
 if __name__ == "__main__":
     import asyncio
@@ -104,3 +104,4 @@ if __name__ == "__main__":
             print(f"❌ Pipeline failed: {str(e)}")
             
     asyncio.run(run_test())
+"""
