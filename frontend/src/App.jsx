@@ -59,7 +59,8 @@ export default function App() {
           <ProjectDetail 
             project={activeProject}
             documents={Object.values(store.documents).filter(d => d.projectId === activeProject.id)}
-            onUpload={(file) => store.uploadDocument(activeProject.id, file)}
+            // UPDATE THIS LINE TO PASS MODE:
+            onUpload={(file, mode) => store.uploadDocument(activeProject.id, file, mode)}
             onOpenDoc={(id) => { setActiveDocId(id); setCurrentView('WORKSPACE'); }}
           />
         )}

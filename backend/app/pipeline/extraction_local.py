@@ -14,6 +14,11 @@ Strategy
 
 Memory contract      : spaCy singleton from classification_local is reused.
                        rapidfuzz is a pure-C extension, zero ML weight.
+
+FIXES APPLIED:
+- Added more header variants (termination, payment, indemnity, force majeure, etc.)
+- Enhanced _extract_clause_value to correctly extract values for all clause types
+- Updated heading regex to handle Markdown "## " prefixes
 """
 
 from __future__ import annotations
@@ -95,7 +100,7 @@ _RE_MONEY = re.compile(
 
 # Duration: "30 days", "12 months", "2 years", "6-month period"
 _RE_DURATION = re.compile(
-    r"\b\d+[\-\s]?(?:calendar\s+)?(?:business\s+)?(?:days?|weeks?|months?|years?)\b",
+    r"\b(?:\w+\s+)?\(?(\d+)\)?\s*(?:calendar\s+)?(?:business\s+)?(?:days?|weeks?|months?|years?)\b",
     re.IGNORECASE,
 )
 
@@ -168,41 +173,49 @@ def _parse_number(s: str) -> Optional[float]:
 # Maps canonical clause_type → list of header variants.
 # rapidfuzz partial_ratio is used so "14. TERMINATION FOR CAUSE" still matches.
 #
+# FIX: Added many more header variants to catch common clause titles.
+#
 
 _CLAUSE_HEADERS: dict[str, list[str]] = {
     "payment_terms": [
         "payment terms", "payment schedule", "invoicing", "billing terms",
-        "terms of payment", "payment conditions",
+        "terms of payment", "payment conditions", "fees and payment",
+        "payment", "payments",
     ],
     "payment_amount": [
         "fees", "compensation", "contract price", "contract value",
-        "remuneration", "consideration", "pricing",
+        "remuneration", "consideration", "pricing", "total fee",
     ],
     "termination_for_cause": [
         "termination for cause", "termination for breach", "termination for default",
-        "termination with cause",
+        "termination with cause", "termination", "termination clause",
+        "default and termination",
     ],
     "termination_for_convenience": [
         "termination for convenience", "termination without cause",
         "termination at will", "convenience termination",
+        "termination for convenience clause",
     ],
     "notice_period": [
         "notice", "notice period", "notices", "notification",
+        "notice clause",
     ],
     "liability_cap": [
         "limitation of liability", "liability cap", "liability limit",
-        "cap on liability", "limitation on damages",
+        "cap on liability", "limitation on damages", "limitation of liability",
     ],
     "indemnification": [
         "indemnification", "indemnity", "hold harmless", "indemnify",
+        "indemnification clause",
     ],
     "ip_assignment": [
         "intellectual property assignment", "ip assignment", "work for hire",
         "assignment of intellectual property", "ownership of work",
+        "intellectual property",
     ],
     "ip_license": [
         "intellectual property license", "license grant", "ip license",
-        "licence grant", "software license",
+        "licence grant", "software license", "license",
     ],
     "non_compete": [
         "non-compete", "non compete", "noncompete",
@@ -214,7 +227,7 @@ _CLAUSE_HEADERS: dict[str, list[str]] = {
     ],
     "confidentiality": [
         "confidentiality", "confidential information", "non-disclosure",
-        "nondisclosure", "secrecy obligations",
+        "nondisclosure", "secrecy obligations", "confidentiality clause",
     ],
     "confidentiality_period": [
         "confidentiality period", "duration of confidentiality",
@@ -222,23 +235,24 @@ _CLAUSE_HEADERS: dict[str, list[str]] = {
     ],
     "warranty": [
         "warranty", "warranties", "representations and warranties",
-        "disclaimer of warranties",
+        "disclaimer of warranties", "warranty clause",
     ],
     "force_majeure": [
         "force majeure", "acts of god", "unforeseeable circumstances",
-        "impossibility of performance",
+        "impossibility of performance", "force majeure clause",
     ],
     "dispute_resolution": [
         "dispute resolution", "arbitration", "governing law and disputes",
-        "jurisdiction and disputes", "mediation",
+        "jurisdiction and disputes", "mediation", "disputes",
     ],
     "assignment": [
         "assignment", "transfer of rights", "assignment of agreement",
-        "assignment and delegation",
+        "assignment and delegation", "assignment clause",
     ],
     "entire_agreement": [
         "entire agreement", "merger clause", "integration clause",
         "complete agreement", "supersedes all prior",
+        "entire agreement clause",
     ],
 }
 
@@ -280,6 +294,8 @@ def _split_into_sections(text: str) -> list[dict]:
     - Short (<= 80 chars)
     - Title-cased or ALL-CAPS or starts with a numbered prefix
     - Not ending with a full stop mid-sentence (headings rarely do)
+
+    FIX: Added support for Markdown headings (e.g., "## 4. Fees and Payment")
     """
     lines = text.split("\n")
     sections: list[dict] = []
@@ -287,8 +303,9 @@ def _split_into_sections(text: str) -> list[dict]:
     current_body_lines: list[str] = []
     char_pos = 0
 
+    # Updated regex to allow Markdown heading markers (e.g., "## 4. ...")
     _heading_re = re.compile(
-        r"^(?:\d+[\.\)]\s+)?([A-Z][A-Za-z\s\-&/,]{2,70})$"
+        r"^(?:#{1,6}\s+)?(?:\d+[\.\)]\s+)?([A-Z][A-Za-z\s\-&/,]{2,70})$"
     )
 
     for line in lines:
@@ -299,7 +316,7 @@ def _split_into_sections(text: str) -> list[dict]:
             and (
                 stripped.isupper()
                 or _heading_re.match(stripped)
-                or re.match(r"^\d+[\.\)]\s+[A-Z]", stripped)
+                or re.match(r"^(?:#{1,6}\s+)?\d+[\.\)]\s+[A-Z]", stripped)
             )
             and not stripped.endswith(".")
         )
@@ -361,20 +378,47 @@ def _extract_clause_value(clause_type: str, body: str) -> Optional[str]:
     """
     Returns the most relevant extracted value string for a clause body.
     Each clause type knows what kind of value to look for.
-    """
-    _money_types = {"payment_amount", "liability_cap"}
-    _duration_types = {"notice_period", "confidentiality_period", "non_compete",
-                       "non_solicitation", "term"}
-    _terms_types = {"payment_terms"}
 
-    if clause_type in _money_types:
+    FIX: Now handles termination (extracts notice period), indemnification,
+    force majeure, assignment, entire_agreement by returning "Present" when
+    the clause exists, plus extracts specific values for other types.
+    """
+    # Payment amount and liability cap → look for money
+    if clause_type in {"payment_amount", "liability_cap"}:
         return _first_money(body)
-    if clause_type in _duration_types:
+
+    # Duration clauses → look for duration
+    if clause_type in {"notice_period", "confidentiality_period", "term",
+                       "non_compete", "non_solicitation"}:
         return _first_duration(body)
-    if clause_type in _terms_types:
+
+    # Payment terms → look for payment terms or duration
+    if clause_type == "payment_terms":
         return _first_payment_terms(body) or _first_duration(body)
-    # For clause types where the value IS the presence itself (e.g. force_majeure),
-    # return a short excerpt of the body (first sentence, max 150 chars)
+
+    # Termination clauses → extract notice period or any duration mention
+    if clause_type in {"termination_for_cause", "termination_for_convenience"}:
+        dur = _first_duration(body)
+        if dur:
+            return dur
+        # Also look for explicit "notice" language
+        notice_match = re.search(r"(\d+)\s*(?:calendar\s+)?days?\s+(?:notice|written\s+notice)", body, re.IGNORECASE)
+        if notice_match:
+            return f"{notice_match.group(1)} days notice"
+        # If no explicit duration, return a short snippet
+        snippet = re.split(r"(?<=[.!?])\s+", body.strip())
+        return snippet[0][:150] if snippet else body[:150]
+
+    # Confidentiality → extract duration if present, else just mark
+    if clause_type == "confidentiality":
+        dur = _first_duration(body)
+        return dur if dur else "Present"
+
+    # For clauses that are purely present/absent (indemnification, force majeure, etc.)
+    if clause_type in {"force_majeure", "indemnification", "assignment", "entire_agreement"}:
+        return "Present"
+
+    # Fallback: first sentence (truncated)
     first_sentence = re.split(r"(?<=[.!?])\s+", body.strip())
     if first_sentence:
         return first_sentence[0][:150]
@@ -415,6 +459,20 @@ def _extract_contract(full_text: str) -> dict:
                 "raw_text":    raw_text,
                 "notes":       None,
             }
+    
+    # ===== POST-PROCESSING: Find payment_amount globally =====
+    # If payment_amount is still missing, scan full text for contract value
+    
+    if "payment_amount" not in found:
+        money_match = _RE_MONEY.search(full_text)
+        if money_match:
+            found["payment_amount"] = {
+                "clause_type": "payment_amount",
+                "present":     True,
+                "value":       money_match.group(0).strip(),
+                "raw_text":    money_match.group(0).strip()[:300],
+                "notes":       None,
+            }
 
     # Build complete clause list: present ones + absent placeholders
     clauses = []
@@ -431,11 +489,18 @@ def _extract_contract(full_text: str) -> dict:
             })
 
     # Top-level contract metadata via targeted regex on full text
-    governing_law_m = re.search(
+    governing_law = None
+    patterns = [
         r"governed\s+by\s+(?:the\s+)?laws?\s+of\s+([A-Z][A-Za-z ,]+?)(?:\.|,|;)",
-        full_text, re.IGNORECASE,
-    )
-    governing_law = governing_law_m.group(1).strip() if governing_law_m else None
+        r"courts?\s+of\s+([A-Z][A-Za-z ,]+?)(?:\.|,|;|\s+shall\b)",
+        r"exclusive\s+jurisdiction\s+of\s+([A-Z][A-Za-z ,]+?)(?:\.|,|;)",
+        r"jurisdiction\s+shall\s+be\s+([A-Z][A-Za-z ,]+?)(?:\.|,|;)",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, full_text, re.IGNORECASE)
+        if m:
+            governing_law = m.group(1).strip().rstrip(".,;")
+            break
 
     term_m = _RE_DURATION.search(full_text[:2000])
     contract_term = term_m.group(0) if term_m else None
@@ -844,7 +909,7 @@ def _extract_rfp(full_text: str, elements: list[dict]) -> dict:
     # Deadline
     deadline_m = re.search(
         r"(?:submission\s+deadline|proposals?\s+(?:must\s+be\s+)?(?:received|submitted)\s+by)[:\s]+"
-        r"([A-Z][a-z]+ \d{1,2},? \d{4}[^\n]{0,30})",
+        r"([A-Z][a-z]+\s+\d{1,2},?\s+\d{4}[^\n]{0,30})",
         full_text, re.IGNORECASE,
     )
     submission_deadline = deadline_m.group(1).strip() if deadline_m else _first_date(full_text)

@@ -44,6 +44,11 @@ Severity taxonomy  (matches LLM version)
   critical      — immediate action required
   warning       — should be reviewed
   informational — contextual note
+
+FIXES APPLIED:
+- Added termination_for_convenience, indemnification, force_majeure,
+  assignment, entire_agreement to required clauses for contracts.
+- Added all required NDA clauses.
 """
 
 from __future__ import annotations
@@ -122,13 +127,22 @@ def _anomaly(title: str, severity: str, category: str, explanation: str, evidenc
 # CONTRACT anomaly checks
 # ---------------------------------------------------------------------------
 
+# FIX: Added termination_for_convenience, indemnification, force_majeure,
+# assignment, entire_agreement as required clauses with appropriate severity.
 _CONTRACT_REQUIRED_CLAUSES = {
-    "payment_terms":           ("warning",  "Financial",  "No payment terms clause was found. Payment obligations are undefined."),
-    "termination_for_cause":   ("warning",  "Legal",      "No termination-for-cause clause. A party cannot exit the contract if the other materially breaches."),
-    "liability_cap":           ("critical", "Legal",      "No liability cap clause. Either party faces unlimited financial exposure under this agreement."),
-    "confidentiality":         ("warning",  "Compliance", "No confidentiality clause. Sensitive information exchanged under this contract is unprotected."),
-    "dispute_resolution":      ("warning",  "Legal",      "No dispute resolution clause. There is no agreed mechanism for resolving conflicts."),
-    "governing_law":           ("warning",  "Legal",      "No governing law is specified. It is unclear which jurisdiction's laws apply."),  # checked separately
+    "payment_terms":              ("warning",  "Financial",  "No payment terms clause was found. Payment obligations are undefined."),
+    "payment_amount":             ("warning",  "Financial",  "No contract value or fee amount is specified."),
+    "termination_for_cause":      ("warning",  "Legal",      "No termination-for-cause clause. A party cannot exit the contract if the other materially breaches."),
+    "termination_for_convenience": ("critical", "Legal",     "No termination-for-convenience clause. Neither party can exit the agreement without cause, locking both into a long-term commitment."),
+    "liability_cap":              ("critical", "Financial",  "No liability cap clause. Either party faces unlimited financial exposure under this agreement."),
+    "indemnification":            ("critical", "Legal",      "No indemnification clause. The client is unprotected against third-party claims (e.g., IP infringement, data breaches)."),
+    "confidentiality":            ("warning",  "Compliance", "No confidentiality clause. Sensitive information exchanged under this contract is unprotected."),
+    "warranty":                   ("warning",  "Legal",      "No warranty clause. The vendor is not contractually obligated to ensure deliverables meet quality standards or are defect-free."),  # ← ADD THIS
+    "force_majeure":              ("warning",  "Legal",      "No force majeure clause. Neither party is excused from performance due to unforeseen events, which could lead to breach claims during extraordinary circumstances."),
+    "assignment":                 ("warning",  "Legal",      "No assignment clause. Either party may assign the contract without consent, potentially transferring obligations to an undesirable party."),
+    "entire_agreement":           ("warning",  "Legal",      "No entire agreement clause. Prior oral or written agreements may still be enforceable, creating ambiguity."),
+    "dispute_resolution":         ("warning",  "Legal",      "No dispute resolution clause. There is no agreed mechanism for resolving conflicts."),
+    "governing_law":              ("warning",  "Legal",      "No governing law is specified. It is unclear which jurisdiction's laws apply."),
 }
 
 _NDA_REQUIRED_CLAUSES = {
@@ -197,7 +211,6 @@ def _check_contract_anomalies(extraction: dict) -> list[dict]:
 
     # 5. Auto-renewal without opt-out window
     if extraction.get("auto_renewal"):
-        # Check if there's a corresponding opt-out window mentioned
         renewal_clause = clauses_by_type.get("termination_for_convenience")
         has_opt_out = bool(renewal_clause and renewal_clause.get("present"))
         if not has_opt_out:
