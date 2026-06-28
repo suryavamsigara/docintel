@@ -8,6 +8,8 @@ from app.websockets.manager import ws_manager
 from app.pipeline.ingestion import run_ingestion_stage
 from app.pipeline.classification import run_classification_stage
 from app.pipeline.extraction import run_extraction_stage
+from app.pipeline.anomaly import run_anomaly_stage
+from app.pipeline.risk import run_risk_stage
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +111,41 @@ async def run_full_pipeline(file: UploadFile, client_id: str):
         print("="*50)
         
         await ws_manager.emit_stage_update(client_id, "extraction", "complete", data=ext_data, detail=f"Extracted in {duration}s", duration=duration)
+
+
+        # --- STAGE 4: ANOMALY DETECTION ---
+        t0 = time.time()
+        await ws_manager.emit_stage_update(client_id, "anomaly", "running", detail="Scanning for anomalies...")
+        anomaly_result = await asyncio.to_thread(run_anomaly_stage, ext_data)
+        
+        if anomaly_result.get("status") == "error":
+            await ws_manager.emit_stage_update(client_id, "anomaly", "error", error=anomaly_result.get("error"))
+            return
+            
+        anom_data = anomaly_result["data"]
+        duration = round(time.time() - t0, 1)
+        await ws_manager.emit_stage_update(client_id, "anomaly", "complete", data=anom_data, detail=f"Found {len(anom_data.get('anomalies', []))} anomalies in {duration}s", duration=duration)
+
+        print("="*50)
+        print(anom_data)
+        print("="*50)
+
+        # --- STAGE 5: RISK SCORING ---
+        t0 = time.time()
+        await ws_manager.emit_stage_update(client_id, "risk", "running", detail="Calculating risk profile...")
+        risk_result = run_risk_stage(anom_data, ext_data) # Not async/cpu bound enough to need thread
+        
+        if risk_result.get("status") == "error":
+            await ws_manager.emit_stage_update(client_id, "risk", "error", error=risk_result.get("error"))
+            return
+            
+        risk_data = risk_result["data"]
+        duration = round(time.time() - t0, 1)
+        await ws_manager.emit_stage_update(client_id, "risk", "complete", data=risk_data, detail=f"Risk assessed as {risk_data.get('risk_level')} in {duration}s", duration=duration)
+
+        print("="*50)
+        print(risk_data)
+        print("="*50)
 
     except Exception as e:
         logger.error(f"Pipeline orchestrator failed: {traceback.format_exc()}")

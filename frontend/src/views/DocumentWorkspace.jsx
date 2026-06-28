@@ -4,6 +4,7 @@ import PipelineTab from '../components/tabs/PipelineTab';
 import ClassificationTab from '../components/tabs/ClassificationTab';
 import ExtractionTab from '../components/tabs/ExtractionTab';
 import OverviewTab from '../components/tabs/OverviewTab';
+import AnomaliesTab from '../components/tabs/AnomaliesTab';
 
 export default function DocumentWorkspace({ document }) {
   const [activeTab, setActiveTab] = useState(document.status === 'completed' ? 'OVERVIEW' : 'PIPELINE');
@@ -29,6 +30,8 @@ export default function DocumentWorkspace({ document }) {
     { id: 'PIPELINE', label: 'Pipeline', show: true },
     { id: 'CLASSIFICATION', label: 'Classification', show: !!document.stages.classification?.data },
     { id: 'EXTRACTION', label: 'Data & Clauses', show: !!document.stages.extraction?.data },
+    // NEW TAB HERE:
+    { id: 'ANOMALIES', label: 'Anomalies & Risk', show: !!document.stages.anomaly?.data },
   ].filter(t => t.show);
 
   return (
@@ -99,6 +102,13 @@ export default function DocumentWorkspace({ document }) {
           {activeTab === 'PIPELINE' && <PipelineTab stages={document.stages} />}
           {activeTab === 'CLASSIFICATION' && <ClassificationTab data={document.stages.classification?.data} onJump={handleJumpToPage} filter={searchQuery} />}
           {activeTab === 'EXTRACTION' && <ExtractionTab data={document.stages.extraction?.data} onJump={handleJumpToPage} filter={searchQuery} />}
+          {activeTab === 'ANOMALIES' && (
+             <AnomaliesTab 
+               anomalyData={document.stages.anomaly?.data} 
+               riskData={document.stages.risk?.data} 
+               onJump={handleJumpToPage} 
+             />
+          )}
         </div>
       </div>
     </div>

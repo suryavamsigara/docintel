@@ -46,7 +46,7 @@ _USER_PROMPT_TEMPLATE = """Analyse the following document text and return a JSON
     - "value": the place name only (e.g. "Delaware", "England and Wales", "Singapore")
     - "context": the exact clause that establishes this jurisdiction (max 200 chars)
 
-  "document_summary": "string | null — A concise 3-5 line summary of the document's purpose, key terms, and overall context.",
+  "document_summary": string | null — A concise 3-5 line summary of the document's purpose, key terms, and overall context.
 }}
 
 Important:
