@@ -121,7 +121,7 @@ async def run_full_pipeline(
     file: UploadFile,
     client_id: str,
     project_id: str,
-    mode: ProcessingMode = "local",
+    mode: ProcessingMode = "llm",
 ) -> None:
     """
     Orchestrates the full 5-stage pipeline.

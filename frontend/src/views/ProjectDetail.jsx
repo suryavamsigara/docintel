@@ -13,7 +13,7 @@ export default function ProjectDetail() {
   
   const [loading, setLoading] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
-  const [processingMode, setProcessingMode] = useState('local');
+  const [processingMode, setProcessingMode] = useState('llm');
 
   const fetchProjectData = useCallback(async () => {
     try {
@@ -138,8 +138,8 @@ export default function ProjectDetail() {
           <div className="max-w-2xl mx-auto">
             <div className="flex items-center justify-center mb-6">
               <div className="bg-gray-100/80 p-1 rounded-xl flex space-x-1 border border-gray-200/60 shadow-inner">
-                <button onClick={() => setProcessingMode('local')} className={`flex items-center px-4 py-2 rounded-lg text-sm font-semibold ${processingMode === 'local' ? 'bg-white text-gray-900 shadow-sm border border-gray-200/50' : 'text-gray-500 hover:text-gray-700'}`}><Cpu className={`w-4 h-4 mr-2 ${processingMode === 'local' ? 'text-blue-600' : ''}`} /> Local Engine</button>
-                <button onClick={() => setProcessingMode('llm')} className={`flex items-center px-4 py-2 rounded-lg text-sm font-semibold ${processingMode === 'llm' ? 'bg-white text-gray-900 shadow-sm border border-gray-200/50' : 'text-gray-500 hover:text-gray-700'}`}><Sparkles className={`w-4 h-4 mr-2 ${processingMode === 'llm' ? 'text-indigo-600' : ''}`} /> DeepSeek LLM</button>
+                <button onClick={() => setProcessingMode('llm')} className={`flex items-center px-4 py-2 rounded-lg text-sm font-semibold ${processingMode === 'llm' ? 'bg-white text-gray-900 shadow-sm border border-gray-200/50' : 'text-gray-500 hover:text-gray-700'}`}><Cpu className={`w-4 h-4 mr-2 ${processingMode === 'llm' ? 'text-blue-600' : ''}`} /> LLM</button>
+                <button onClick={() => setProcessingMode('local')} className={`flex items-center px-4 py-2 rounded-lg text-sm font-semibold ${processingMode === 'local' ? 'bg-white text-gray-900 shadow-sm border border-gray-200/50' : 'text-gray-500 hover:text-gray-700'}`}><Sparkles className={`w-4 h-4 mr-2 ${processingMode === 'local' ? 'text-indigo-600' : ''}`} /> Local Engine</button>
               </div>
             </div>
             <label onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={handleDrop} className={`flex flex-col items-center justify-center w-full h-40 border-2 border-dashed rounded-2xl cursor-pointer transition-all ${isDragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300 bg-gray-50 hover:bg-gray-100'}`}>

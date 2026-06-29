@@ -107,7 +107,7 @@ async def upload_document(
     file: UploadFile = File(...),
     project_id: str = Form(...),
     client_id: str = Form(None), 
-    x_processing_mode: Literal["local", "llm"] = Header(default="local"),
+    x_processing_mode: Literal["local", "llm"] = Header(default="llm"),
 ):
     if not client_id: client_id = generate_id("doc")
     client = get_client()
@@ -117,7 +117,7 @@ async def upload_document(
         [client_id, project_id, file.filename, "processing"]
     )
 
-    mode = x_processing_mode if x_processing_mode in ("local", "llm") else "local"
+    mode = x_processing_mode if x_processing_mode in ("local", "llm") else "llm"
     background_tasks.add_task(run_full_pipeline, file, client_id, project_id, mode)
 
     return {"message": "Processing started", "doc_id": client_id, "mode": mode}
