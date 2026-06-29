@@ -138,6 +138,7 @@ async def run_full_pipeline(
             client_id, "ingestion", "running",
             detail="Analysing format...",
         )
+        await asyncio.sleep(1.0)
         ingestion_result = await run_ingestion_stage(file)
 
         if ingestion_result.get("status") == "error":
@@ -173,6 +174,7 @@ async def run_full_pipeline(
             client_id, "classification", "running",
             detail=f"Identifying document ({mode_label})...",
         )
+        await asyncio.sleep(1.0)
         class_result = await asyncio.to_thread(_classify, doc_data, mode)
 
         if class_result.get("status") == "error":
@@ -204,6 +206,7 @@ async def run_full_pipeline(
             client_id, "extraction", "running",
             detail=f"Extracting clauses ({mode_label})...",
         )
+        await asyncio.sleep(1.0)
         ext_result = await asyncio.to_thread(_extract, doc_data, classification_data, mode)
 
         if ext_result.get("status") == "error":
@@ -235,6 +238,7 @@ async def run_full_pipeline(
             client_id, "anomaly", "running",
             detail=f"Scanning for anomalies ({mode_label})...",
         )
+        await asyncio.sleep(1.0)
         anomaly_result = await asyncio.to_thread(_anomaly, ext_data, mode)
 
         if anomaly_result.get("status") == "error":
@@ -263,6 +267,7 @@ async def run_full_pipeline(
             client_id, "risk", "running",
             detail="Calculating risk profile...",
         )
+        await asyncio.sleep(1.0)
         risk_result = run_risk_stage(anom_data, ext_data)
 
         if risk_result.get("status") == "error":
@@ -289,6 +294,7 @@ async def run_full_pipeline(
         # --- STAGE 5: CROSS-DOCUMENT CONTRADICTIONS ---
         t0 = time.time()
         await ws_manager.emit_stage_update(client_id, "cross_document", "running", detail="Checking cross-document contradictions...")
+        await asyncio.sleep(1.0)
         
         cross_result = await run_cross_document_stage(client_id, file.filename, project_id, ext_data, get_client)
 

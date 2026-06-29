@@ -22,11 +22,12 @@ export default function DocumentWorkspace() {
     fileUrl: location.state?.fileUrl || null,
     status: 'processing',
     stages: {
-      ingestion: { status: 'pending' },
+      ingestion: { status: 'running' }, 
       classification: { status: 'pending' },
       extraction: { status: 'pending' },
       anomaly: { status: 'pending' },
-      risk: { status: 'pending' }
+      risk: { status: 'pending' },
+      cross_document: { status: 'pending' } 
     }
   });
 
