@@ -48,6 +48,8 @@ from app.pipeline.anomaly_local        import run_anomaly_stage_local        as 
 # ── Risk scoring (pure rule-based, same for both modes) ───────────────────
 from app.pipeline.risk import run_risk_stage
 
+from app.pipeline.crm import sync_to_notion
+
 from app.db import get_client
 
 
@@ -331,6 +333,15 @@ async def run_full_pipeline(
             "UPDATE documents SET status = 'completed', analysis_data = ? WHERE id = ?",
             [json.dumps(final_stages), client_id] # Note: client_id is used as doc_id in main.py
         )
+
+        await ws_manager.emit_stage_update(client_id, "crm", "running", detail="Syncing to Notion CRM...")
+        await asyncio.sleep(1.0)
+        crm_result = await sync_to_notion(client_id)
+
+        if crm_result["status"] == "synced":
+            await ws_manager.emit_stage_update(client_id, "crm", "complete", detail=crm_result["detail"])
+        else:
+            await ws_manager.emit_stage_update(client_id, "crm", "error", error=crm_result["error"])
 
     except Exception as e:
         logger.error("Pipeline orchestrator failed: %s", traceback.format_exc())

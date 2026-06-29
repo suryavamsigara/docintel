@@ -1,5 +1,6 @@
 import uuid
 import json
+import hashlib
 import asyncio
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, BackgroundTasks, Header, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,7 +9,8 @@ from typing import Literal
 from app.websockets.manager import ws_manager
 from app.pipeline.orchestrator_mode_aware import run_full_pipeline
 # FIX: Import get_client instead of the raw client
-from app.db import init_db, get_client, generate_id 
+from app.db import init_db, get_client, generate_id
+from app.pipeline.crm import sync_to_notion
 
 app = FastAPI(title="Contract Intelligence API")
 
@@ -49,20 +51,30 @@ async def create_project(name: str = Form(...)):
 @app.get("/api/projects/{project_id}/documents")
 async def get_project_documents(project_id: str):
     client = get_client()
+    
+    # We use SELECT * to grab everything available without hardcoding columns that might be missing
     result = await client.execute(
-        "SELECT id, name, status, created_at FROM documents WHERE project_id = ? ORDER BY created_at DESC", 
+        "SELECT * FROM documents WHERE project_id = ? ORDER BY created_at DESC", 
         [project_id]
     )
-    # FIX: Use bracket notation
-    return [
-        {
+    
+    docs = []
+    for r in result.rows:
+        # Safely attempt to read the CRM status; if the DB hasn't updated yet, default to "pending"
+        try:
+            crm_val = r["crm_status"]
+        except KeyError:
+            crm_val = "pending"
+            
+        docs.append({
             "id": r["id"], 
             "name": r["name"], 
             "status": r["status"], 
+            "crm_status": crm_val,
             "created_at": r["created_at"]
-        } 
-        for r in result.rows
-    ]
+        })
+        
+    return docs
 
 @app.get("/api/documents/{doc_id}")
 async def get_document(doc_id: str):
@@ -107,20 +119,25 @@ async def upload_document(
     file: UploadFile = File(...),
     project_id: str = Form(...),
     client_id: str = Form(None), 
-    x_processing_mode: Literal["local", "llm"] = Header(default="llm"),
+    x_processing_mode: Literal["local", "llm"] = Header(default="local"),
 ):
     if not client_id: client_id = generate_id("doc")
-    client = get_client()
     
+    # Read file to calculate hash, then seek back to 0 so the pipeline can read it
+    file_bytes = await file.read()
+    content_hash = hashlib.sha256(file_bytes).hexdigest()
+    await file.seek(0)
+    
+    client = get_client()
     await client.execute(
-        "INSERT INTO documents (id, project_id, name, status) VALUES (?, ?, ?, ?)",
-        [client_id, project_id, file.filename, "processing"]
+        "INSERT INTO documents (id, project_id, name, status, content_hash, crm_status) VALUES (?, ?, ?, ?, ?, ?)",
+        [client_id, project_id, file.filename, "processing", content_hash, "pending"]
     )
 
-    mode = x_processing_mode if x_processing_mode in ("local", "llm") else "llm"
+    mode = x_processing_mode if x_processing_mode in ("local", "llm") else "local"
     background_tasks.add_task(run_full_pipeline, file, client_id, project_id, mode)
 
-    return {"message": "Processing started", "doc_id": client_id, "mode": mode}
+    return {"message": "Processing started", "doc_id": client_id}
 
 
 @app.get("/api/projects")
@@ -167,3 +184,10 @@ async def get_project_contradictions(project_id: str):
             pass
             
     return all_contradictions
+
+@app.post("/api/documents/{doc_id}/sync")
+async def trigger_crm_sync(doc_id: str):
+    result = await sync_to_notion(doc_id)
+    if result["status"] == "error":
+        raise HTTPException(status_code=500, detail=result.get("error"))
+    return {"message": "Sync successful", "detail": result.get("detail")}

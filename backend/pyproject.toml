@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.138.1",
+    "httpx>=0.28.1",
     "huggingface-hub>=1.21.0",
     "libsql-client>=0.3.1",
     "onnxruntime>=1.27.0",

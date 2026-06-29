@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { FileText, UploadCloud, Loader2, CheckCircle2, ChevronRight, Cpu, Sparkles, GitPullRequest, AlertTriangle } from 'lucide-react';
+import { FileText, UploadCloud, Loader2, CheckCircle2, ChevronRight, Cpu, Sparkles, GitPullRequest, AlertTriangle, Database, RefreshCw, XCircle } from 'lucide-react';
 
 export default function ProjectDetail() {
   const { projectId } = useParams();
@@ -9,11 +9,14 @@ export default function ProjectDetail() {
   const [project, setProject] = useState(null);
   const [documents, setDocuments] = useState([]);
   const [contradictions, setContradictions] = useState([]);
-  const [activeTab, setActiveTab] = useState('DOCUMENTS'); // 'DOCUMENTS' | 'CONTRADICTIONS'
+  
+  // ADD 'CRM' to the tabs
+  const [activeTab, setActiveTab] = useState('DOCUMENTS'); // 'DOCUMENTS' | 'CONTRADICTIONS' | 'CRM'
   
   const [loading, setLoading] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
   const [processingMode, setProcessingMode] = useState('llm');
+  const [syncingDocs, setSyncingDocs] = useState({});
 
   const fetchProjectData = useCallback(async () => {
     try {
@@ -43,7 +46,6 @@ export default function ProjectDetail() {
     loadProject();
   }, [projectId, fetchProjectData]);
 
-  // Polling mechanism while processing
   useEffect(() => {
     let interval;
     if (documents.some(doc => doc.status === 'processing')) {
@@ -52,21 +54,31 @@ export default function ProjectDetail() {
     return () => clearInterval(interval);
   }, [documents, fetchProjectData]);
 
+  // NEW: Manual Retry Sync Function
+  const handleRetrySync = async (docId) => {
+    setSyncingDocs(prev => ({ ...prev, [docId]: true }));
+    try {
+      await fetch(`http://localhost:8000/api/documents/${docId}/sync`, { method: 'POST' });
+      await fetchProjectData(); // Refresh list to get new status
+    } catch (error) {
+      console.error("Sync failed", error);
+    } finally {
+      setSyncingDocs(prev => ({ ...prev, [docId]: false }));
+    }
+  };
+
   const handleUpload = async (file, mode) => {
+    // ... [Keep your existing upload code exactly the same]
     if (!file) return;
     const tempId = Math.random().toString(36).substring(7);
-    setDocuments(prev => [{ id: tempId, name: file.name, status: 'processing' }, ...prev]);
+    setDocuments(prev => [{ id: tempId, name: file.name, status: 'processing', crm_status: 'pending' }, ...prev]);
     
     const formData = new FormData();
     formData.append('file', file);
     formData.append('project_id', projectId);
 
     try {
-      await fetch('http://localhost:8000/api/upload', {
-        method: 'POST',
-        headers: { 'X-Processing-Mode': mode },
-        body: formData,
-      });
+      await fetch('http://localhost:8000/api/upload', { method: 'POST', headers: { 'X-Processing-Mode': mode }, body: formData });
       fetchProjectData();
       setActiveTab('DOCUMENTS');
     } catch (err) {
@@ -89,24 +101,20 @@ export default function ProjectDetail() {
 
       {/* Tabs */}
       <div className="flex border-b border-gray-200 mb-8 space-x-8">
-        <button 
-          onClick={() => setActiveTab('DOCUMENTS')}
-          className={`pb-4 text-sm font-bold border-b-2 transition-colors ${activeTab === 'DOCUMENTS' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-900'}`}
-        >
-          Documents <span className="ml-2 bg-gray-100 text-gray-600 py-0.5 px-2 rounded-full text-xs">{documents.length}</span>
+        <button onClick={() => setActiveTab('DOCUMENTS')} className={`pb-4 text-sm font-bold border-b-2 transition-colors flex items-center ${activeTab === 'DOCUMENTS' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-900'}`}>
+          <FileText className="w-4 h-4 mr-2" /> Documents <span className="ml-2 bg-gray-100 text-gray-600 py-0.5 px-2 rounded-full text-xs">{documents.length}</span>
         </button>
-        <button 
-          onClick={() => setActiveTab('CONTRADICTIONS')}
-          className={`pb-4 text-sm font-bold border-b-2 transition-colors flex items-center ${activeTab === 'CONTRADICTIONS' ? 'border-rose-600 text-rose-600' : 'border-transparent text-gray-500 hover:text-gray-900'}`}
-        >
-          <GitPullRequest className="w-4 h-4 mr-2" /> Contradictions 
-          {contradictions.length > 0 && <span className="ml-2 bg-rose-100 text-rose-600 py-0.5 px-2 rounded-full text-xs">{contradictions.length}</span>}
+        <button onClick={() => setActiveTab('CONTRADICTIONS')} className={`pb-4 text-sm font-bold border-b-2 transition-colors flex items-center ${activeTab === 'CONTRADICTIONS' ? 'border-rose-600 text-rose-600' : 'border-transparent text-gray-500 hover:text-gray-900'}`}>
+          <GitPullRequest className="w-4 h-4 mr-2" /> Contradictions {contradictions.length > 0 && <span className="ml-2 bg-rose-100 text-rose-600 py-0.5 px-2 rounded-full text-xs">{contradictions.length}</span>}
+        </button>
+        <button onClick={() => setActiveTab('CRM')} className={`pb-4 text-sm font-bold border-b-2 transition-colors flex items-center ${activeTab === 'CRM' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-gray-500 hover:text-gray-900'}`}>
+          <Database className="w-4 h-4 mr-2" /> CRM Sync
         </button>
       </div>
 
-      {activeTab === 'DOCUMENTS' ? (
+      {activeTab === 'DOCUMENTS' && (
+        /* ... Keep your existing Documents and Upload section here exactly as it was ... */
         <>
-          {/* Document List */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden mb-12">
             {documents.length === 0 ? (
               <div className="p-12 text-center text-gray-500">No documents in this project yet.</div>
@@ -134,7 +142,6 @@ export default function ProjectDetail() {
             )}
           </div>
 
-          {/* Upload Section */}
           <div className="max-w-2xl mx-auto">
             <div className="flex items-center justify-center mb-6">
               <div className="bg-gray-100/80 p-1 rounded-xl flex space-x-1 border border-gray-200/60 shadow-inner">
@@ -150,8 +157,61 @@ export default function ProjectDetail() {
             </label>
           </div>
         </>
-      ) : (
-        <div className="space-y-6">
+      )}
+
+      {/* NEW CRM PANEL */}
+      {activeTab === 'CRM' && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+            <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">Notion Sync Status</h3>
+            <p className="text-xs text-gray-500">Duplicate hashes are merged automatically.</p>
+          </div>
+          <table className="w-full text-left text-sm">
+            <thead className="bg-white border-b border-gray-100 text-gray-500">
+              <tr>
+                <th className="px-6 py-3 font-semibold">Document Name</th>
+                <th className="px-6 py-3 font-semibold">Analysis Status</th>
+                <th className="px-6 py-3 font-semibold">CRM Sync</th>
+                <th className="px-6 py-3 font-semibold text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {documents.map(doc => (
+                <tr key={doc.id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4 font-medium text-gray-900">{doc.name}</td>
+                  <td className="px-6 py-4 capitalize">{doc.status}</td>
+                  <td className="px-6 py-4">
+                    {doc.crm_status === 'synced' ? (
+                      <span className="flex items-center text-emerald-600 font-medium"><CheckCircle2 className="w-4 h-4 mr-2" /> Synced</span>
+                    ) : doc.crm_status === 'failed' ? (
+                      <span className="flex items-center text-rose-600 font-medium"><XCircle className="w-4 h-4 mr-2" /> Failed</span>
+                    ) : (
+                      <span className="flex items-center text-gray-500 font-medium"><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Pending</span>
+                    )}
+                  </td>
+                  <td className="px-6 py-4 text-right">
+                    {(doc.crm_status === 'failed' || doc.crm_status === 'pending') && doc.status === 'completed' && (
+                      <button 
+                        onClick={() => handleRetrySync(doc.id)}
+                        disabled={syncingDocs[doc.id]}
+                        className="inline-flex items-center px-3 py-1.5 border border-gray-300 shadow-sm text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                      >
+                        {syncingDocs[doc.id] ? <Loader2 className="w-3 h-3 animate-spin mr-1.5" /> : <RefreshCw className="w-3 h-3 mr-1.5" />}
+                        Retry
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      
+      {/* Existing Contradictions View */}
+      {activeTab === 'CONTRADICTIONS' && (
+          /* ... Keep your existing contradictions view code here ... */
+          <div className="space-y-6">
           {contradictions.length === 0 ? (
              <div className="p-12 text-center text-emerald-600 bg-emerald-50 rounded-2xl border border-emerald-200">
                <CheckCircle2 className="w-12 h-12 mx-auto mb-3" />
@@ -166,8 +226,6 @@ export default function ProjectDetail() {
                   <h3 className="font-bold text-gray-900 text-lg">{c.title}</h3>
                 </div>
                 <p className="text-gray-600 text-sm mb-6 leading-relaxed">{c.description}</p>
-                
-                {/* The Required "Side-by-Side" view */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="bg-rose-50 border border-rose-100 p-4 rounded-xl">
                     <p className="text-[10px] font-bold text-rose-800 uppercase tracking-wider mb-2">{c.doc1_name}</p>

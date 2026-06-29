@@ -44,10 +44,18 @@ async def init_db():
             status TEXT DEFAULT 'processing',
             file_url TEXT,
             analysis_data TEXT, 
+            content_hash TEXT,
+            crm_status TEXT DEFAULT 'pending',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (project_id) REFERENCES projects(id)
         )
     """)
+
+    try:
+        await client.execute("ALTER TABLE documents ADD COLUMN content_hash TEXT")
+        await client.execute("ALTER TABLE documents ADD COLUMN crm_status TEXT DEFAULT 'pending'")
+    except:
+        pass
 
 def generate_id(prefix=""):
     return f"{prefix}_{uuid.uuid4().hex[:8]}"
