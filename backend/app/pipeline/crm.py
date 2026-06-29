@@ -31,30 +31,89 @@ async def sync_to_notion(doc_id: str) -> dict:
     risk_data = analysis.get("risk", {}).get("data", {})
     anom_data = analysis.get("anomaly", {}).get("data", {})
     
+    # The LLM sometimes nests the extraction data under an 'extraction' key
+    actual_data = ext_data.get("extraction", ext_data)
+    
     doc_type = ext_data.get("doc_type", "Unknown").replace("_", " ").title()
     risk_score = risk_data.get("overall_score", 0)
     
-    # Count critical anomalies
+    # ---------------------------------------------------------
+    # 1. ANOMALY COUNT BY SEVERITY
+    # ---------------------------------------------------------
     anomalies = anom_data.get("anomalies", []) if isinstance(anom_data, dict) else []
     critical_count = len([a for a in anomalies if a.get("severity", "").lower() == "critical"])
+    warning_count = len([a for a in anomalies if a.get("severity", "").lower() == "warning"])
+    info_count = len([a for a in anomalies if a.get("severity", "").lower() in ["informational", "info"]])
 
-    # Extract parties (fallback to generic string)
+    # ---------------------------------------------------------
+    # 2. PRIMARY PARTIES EXTRACTION
+    # ---------------------------------------------------------
     parties = "Unknown"
     if doc_type.lower() == "invoice":
-        parties = f"{ext_data.get('vendor', {}).get('name', 'Unknown')} -> {ext_data.get('bill_to', {}).get('name', 'Unknown')}"
+        vendor = actual_data.get('vendor', {})
+        bill_to = actual_data.get('bill_to', {})
+        v_name = vendor.get('name') if isinstance(vendor, dict) else vendor
+        b_name = bill_to.get('name') if isinstance(bill_to, dict) else bill_to
+        parties = f"{v_name or 'Unknown'} -> {b_name or 'Unknown'}"
     else:
-        # Check for 'primary_parties' (which our LLM extracts for NDAs and Contracts)
-        party_list = ext_data.get("parties") or ext_data.get("primary_parties") or []
+        party_list = actual_data.get("parties") or actual_data.get("primary_parties") or []
         if party_list:
-            parties = " & ".join([str(p.get("name", "Unknown")).replace("\n", " ").strip() for p in party_list])
+            parties = " & ".join([str(p.get("name", "Unknown")).replace("\n", " ").strip() for p in party_list if isinstance(p, dict)])
+
+    # ---------------------------------------------------------
+    # 3. DYNAMIC KEY FIELDS BY DOC TYPE (Assignment 3 Requirement)
+    # ---------------------------------------------------------
+    key_fields_dict = {}
+    dt_lower = doc_type.lower()
+    
+    if "contract" in dt_lower or "nda" in dt_lower or "agreement" in dt_lower:
+        clauses = actual_data.get("clauses", [])
+        for c in clauses:
+            ctype = c.get("clause_type", "").replace("_", " ").title()
+            # Only grab the key ones required by the assignment
+            if ctype.lower() in ["payment terms", "termination", "liability cap", "ip assignment", "confidentiality period", "non compete", "confidentiality"]:
+                key_fields_dict[ctype] = c.get("value") or "Present"
+                
+    elif "invoice" in dt_lower:
+        key_fields_dict = {
+            "Invoice Number": actual_data.get("invoice_number"),
+            "Due Date": actual_data.get("due_date"),
+            "Total Amount": actual_data.get("total_amount"),
+            "Tax": actual_data.get("tax_amount"),
+            "Currency": actual_data.get("currency")
+        }
+        
+    elif "financial" in dt_lower:
+        inc = actual_data.get("income_statement", {})
+        bal = actual_data.get("balance_sheet", {})
+        key_fields_dict = {
+            "Revenue": inc.get("revenue"),
+            "Expenses": inc.get("operating_expenses"),
+            "Net Profit": inc.get("net_income"),
+            "Assets": bal.get("total_assets"),
+            "Liabilities": bal.get("total_liabilities"),
+            "Reporting Period": actual_data.get("reporting_period")
+        }
+        
+    elif "rfp" in dt_lower:
+        key_fields_dict = {
+            "Issuer": actual_data.get("issuer"),
+            "Deadline": actual_data.get("submission_deadline"),
+            "Budget": actual_data.get("budget"),
+            "Project Title": actual_data.get("project_title")
+        }
+
+    # Clean up empty values and format into a readable string for Notion
+    valid_fields = [f"• {k}: {v}" for k, v in key_fields_dict.items() if v]
+    key_fields_str = "\n".join(valid_fields) if valid_fields else "No specific key fields extracted."
 
     # ---------------------------------------------------------
     # DEMO FALLBACK: If no Notion keys, simulate success
     # ---------------------------------------------------------
     if not NOTION_TOKEN or not NOTION_DATABASE_ID:
-        logger.warning("Notion keys missing. Simulating successful CRM sync for demo purposes.")
+        logger.warning("Notion keys missing. Simulating successful CRM sync.")
         await client.execute("UPDATE documents SET crm_status = 'synced' WHERE id = ?", [doc_id])
-        return {"status": "synced", "detail": "Simulated sync (No API keys)"}
+        return {"status": "synced", "detail": "Simulated sync"}
 
     headers = {
         "Authorization": f"Bearer {NOTION_TOKEN}",
@@ -65,10 +124,13 @@ async def sync_to_notion(doc_id: str) -> dict:
     # Notion Page Payload Mapping
     properties = {
         "Name": {"title": [{"text": {"content": file_name}}]},
-        "Document Type": {"select": {"name": doc_type}},
+        "Document Type": {"select": {"name": doc_type[:100]}},  # Notion Select limit safety
         "Parties": {"rich_text": [{"text": {"content": str(parties)[:2000]}}]},
+        "Key Fields": {"rich_text": [{"text": {"content": key_fields_str[:2000]}}]},
         "Risk Score": {"number": risk_score},
         "Critical Anomalies": {"number": critical_count},
+        "Warning Anomalies": {"number": warning_count},
+        "Info Anomalies": {"number": info_count},
         "Content Hash": {"rich_text": [{"text": {"content": content_hash}}]},
         "Platform Link": {"url": f"http://localhost:5173/document/{doc_id}"},
         "Processed At": {"date": {"start": datetime.utcnow().isoformat()}}
@@ -92,12 +154,10 @@ async def sync_to_notion(doc_id: str) -> dict:
         
         # 2. Update if exists, Create if not
         if len(data.get("results", [])) > 0:
-            # UPDATE (PATCH)
             page_id = data["results"][0]["id"]
             res = await http.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=headers, json={"properties": properties})
             action = "Updated existing record"
         else:
-            # CREATE (POST)
             create_payload = {"parent": {"database_id": NOTION_DATABASE_ID}, "properties": properties}
             res = await http.post("https://api.notion.com/v1/pages", headers=headers, json=create_payload)
             action = "Created new record"
