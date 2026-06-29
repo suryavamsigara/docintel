@@ -8,7 +8,7 @@ import OverviewTab from '../components/tabs/OverviewTab';
 import AnomaliesTab from '../components/tabs/AnomaliesTab';
 
 // Strict order of pipeline execution
-const STAGE_ORDER = ['ingestion', 'classification', 'extraction', 'anomaly', 'risk'];
+const STAGE_ORDER = ['ingestion', 'classification', 'extraction', 'anomaly', 'risk', 'cross_document'];
 
 export default function DocumentWorkspace() {
   const { docId } = useParams();

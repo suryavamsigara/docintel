@@ -109,23 +109,18 @@ async def upload_document(
     client_id: str = Form(None), 
     x_processing_mode: Literal["local", "llm"] = Header(default="local"),
 ):
-    if not client_id:
-        client_id = generate_id("doc")
-        
-    doc_id = client_id 
+    if not client_id: client_id = generate_id("doc")
     client = get_client()
     
-    # 1. Save document record to Turso
     await client.execute(
         "INSERT INTO documents (id, project_id, name, status) VALUES (?, ?, ?, ?)",
-        [doc_id, project_id, file.filename, "processing"]
+        [client_id, project_id, file.filename, "processing"]
     )
 
-    # 2. Start Background task
     mode = x_processing_mode if x_processing_mode in ("local", "llm") else "local"
-    background_tasks.add_task(run_full_pipeline, file, client_id, mode)
+    background_tasks.add_task(run_full_pipeline, file, client_id, project_id, mode)
 
-    return {"message": "Processing started", "doc_id": doc_id, "mode": mode}
+    return {"message": "Processing started", "doc_id": client_id, "mode": mode}
 
 
 @app.get("/api/projects")
@@ -147,3 +142,28 @@ async def get_projects():
             "docCount": count_map.get(row["id"], 0)
         })
     return projects
+
+@app.get("/api/projects/{project_id}/contradictions")
+async def get_project_contradictions(project_id: str):
+    client = get_client()
+    result = await client.execute(
+        "SELECT analysis_data FROM documents WHERE project_id = ? AND status = 'completed'",
+        [project_id]
+    )
+    all_contradictions = []
+    seen_desc = set()
+    
+    for row in result.rows:
+        if not row["analysis_data"]: continue
+        try:
+            data = json.loads(row["analysis_data"])
+            cross = data.get("cross_document", {}).get("data", {})
+            if cross and cross.get("contradictions"):
+                for c in cross["contradictions"]:
+                    if c["description"] not in seen_desc:
+                        all_contradictions.append(c)
+                        seen_desc.add(c["description"])
+        except:
+            pass
+            
+    return all_contradictions

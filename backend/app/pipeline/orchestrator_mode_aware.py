@@ -38,6 +38,7 @@ from app.pipeline.ingestion import run_ingestion_stage
 from app.pipeline.classification import run_classification_stage       as _llm_classify
 from app.pipeline.extraction     import run_extraction_stage           as _llm_extract
 from app.pipeline.anomaly        import run_anomaly_stage              as _llm_anomaly
+from app.pipeline.cross_document import run_cross_document_stage
 
 # ── Local implementations (new files) ─────────────────────────────────────
 from app.pipeline.classification_local import run_classification_stage_local as _local_classify
@@ -119,6 +120,7 @@ def _anomaly(ext_data: dict, mode: ProcessingMode) -> dict:
 async def run_full_pipeline(
     file: UploadFile,
     client_id: str,
+    project_id: str,
     mode: ProcessingMode = "local",
 ) -> None:
     """
@@ -283,6 +285,29 @@ async def run_full_pipeline(
         print(risk_data)
         print("="*50)
 
+
+        # --- STAGE 5: CROSS-DOCUMENT CONTRADICTIONS ---
+        t0 = time.time()
+        await ws_manager.emit_stage_update(client_id, "cross_document", "running", detail="Checking cross-document contradictions...")
+        
+        cross_result = await run_cross_document_stage(client_id, file.filename, project_id, ext_data, get_client)
+
+        if cross_result.get("status") == "error":
+            await ws_manager.emit_stage_update(client_id, "cross_document", "error", error=cross_result.get("error"))
+            cross_data = None
+        elif cross_result.get("status") == "skipped":
+            cross_data = cross_result.get("data")
+            await ws_manager.emit_stage_update(client_id, "cross_document", "complete", detail="Skipped (no other docs)", data=cross_data)
+        else:
+            cross_data = cross_result.get("data")
+            num_c = len(cross_data.get("contradictions", []))
+            dur = round(time.time() - t0, 1)
+            await ws_manager.emit_stage_update(client_id, "cross_document", "complete", detail=f"Found {num_c} contradictions in {dur}s", data=cross_data)
+
+        print("="*50)
+        print(cross_data)
+        print("="*50)
+
         # =======================================
         # SAVE FINAL RESULTS TO TURSO DATABASE
         # =======================================
@@ -291,9 +316,10 @@ async def run_full_pipeline(
             "classification": {"status": "complete", "data": classification_data},
             "extraction": {"status": "complete", "data": ext_data},
             "anomaly": {"status": "complete", "data": anom_data},
-            "risk": {"status": "complete", "data": risk_data}
+            "risk": {"status": "complete", "data": risk_data},
+            "cross_document": {"status": cross_result.get("status", "complete"), "data": cross_data}
         }
-        
+
         client = get_client()
         await client.execute(
             "UPDATE documents SET status = 'completed', analysis_data = ? WHERE id = ?",
