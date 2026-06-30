@@ -165,9 +165,6 @@ async def run_full_pipeline(
             duration=round(time.time() - t0, 1),
         )
 
-        print("="*50)
-        print(doc_data)
-        print("="*50)
 
         # ── STAGE 2: CLASSIFICATION ───────────────────────────────────────
         t0 = time.time()
@@ -198,9 +195,6 @@ async def run_full_pipeline(
             duration=duration,
         )
 
-        print("="*50)
-        print(classification_data)
-        print("="*50)
 
         # ── STAGE 3: EXTRACTION ───────────────────────────────────────────
         t0 = time.time()
@@ -230,9 +224,6 @@ async def run_full_pipeline(
             duration=duration,
         )
 
-        print("="*50)
-        print(ext_data)
-        print("="*50)
 
         # ── STAGE 4: ANOMALY DETECTION ────────────────────────────────────
         t0 = time.time()
@@ -259,9 +250,6 @@ async def run_full_pipeline(
             duration=duration,
         )
 
-        print("="*50)
-        print(anom_data)
-        print("="*50)
 
         # ── STAGE 5: RISK SCORING (always rule-based) ─────────────────────
         t0 = time.time()
@@ -288,9 +276,6 @@ async def run_full_pipeline(
             duration=duration,
         )
 
-        print("="*50)
-        print(risk_data)
-        print("="*50)
 
 
         # --- STAGE 5: CROSS-DOCUMENT CONTRADICTIONS ---
@@ -312,9 +297,6 @@ async def run_full_pipeline(
             dur = round(time.time() - t0, 1)
             await ws_manager.emit_stage_update(client_id, "cross_document", "complete", detail=f"Found {num_c} contradictions in {dur}s", data=cross_data)
 
-        print("="*50)
-        print(cross_data)
-        print("="*50)
 
         # =======================================
         # SAVE FINAL RESULTS TO TURSO DATABASE
