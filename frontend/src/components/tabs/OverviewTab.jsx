@@ -18,12 +18,6 @@ export default function OverviewTab({ doc }) {
           <p className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-1">Identified As</p>
           <h2 className="text-2xl font-bold text-gray-900 capitalize">{type}</h2>
         </div>
-        <div className="text-right">
-          <div className="inline-flex items-center px-3 py-1 bg-gray-100 text-gray-700 rounded-full border border-gray-200 mb-1">
-            <ShieldAlert className="w-4 h-4 mr-1.5" /> 
-            <span className="text-sm font-semibold">Risk Scan Pending</span>
-          </div>
-        </div>
       </div>
 
       {/* AI Summary */}
