@@ -27,6 +27,15 @@ async def startup_event():
     # This runs safely inside the event loop!
     await init_db()
 
+@app.websocket("/ws/{client_id}")
+async def websocket_endpoint(websocket: WebSocket, client_id: str):
+    await ws_manager.connect(client_id, websocket)
+    try:
+        while True:
+            _ = await websocket.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(client_id)
+
 @app.get("/api/projects/{project_id}")
 async def get_project(project_id: str):
     client = get_client()
@@ -103,15 +112,6 @@ async def get_document(doc_id: str):
         "fileUrl": row["file_url"],
         "stages": stages
     }
-
-@app.websocket("/ws/{client_id}")
-async def websocket_endpoint(websocket: WebSocket, client_id: str):
-    await ws_manager.connect(client_id, websocket)
-    try:
-        while True:
-            _ = await websocket.receive_text()
-    except WebSocketDisconnect:
-        ws_manager.disconnect(client_id)
 
 @app.post("/api/upload")
 async def upload_document(
@@ -191,3 +191,20 @@ async def trigger_crm_sync(doc_id: str):
     if result["status"] == "error":
         raise HTTPException(status_code=500, detail=result.get("error"))
     return {"message": "Sync successful", "detail": result.get("detail")}
+
+@app.get("/api/health")
+async def health_check():
+    """Health check endpoint for deployment platforms (e.g., Railway)."""
+    try:
+        client = get_client()
+        await client.execute("SELECT 1")
+        db_status = "connected"
+        is_healthy = True
+    except Exception as e:
+        db_status = f"disconnected: {str(e)}"
+        is_healthy = False
+
+    return {
+        "status": "ok" if is_healthy else "error",
+        "database": db_status,
+    }
