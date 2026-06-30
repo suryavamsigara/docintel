@@ -7,6 +7,9 @@ import ExtractionTab from '../components/tabs/ExtractionTab';
 import OverviewTab from '../components/tabs/OverviewTab';
 import AnomaliesTab from '../components/tabs/AnomaliesTab';
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000';
+
 // Strict order of pipeline execution
 const STAGE_ORDER = ['ingestion', 'classification', 'extraction', 'anomaly', 'risk', 'cross_document'];
 
@@ -39,7 +42,7 @@ export default function DocumentWorkspace() {
   useEffect(() => {
     const fetchDocInfo = async () => {
       try {
-        const res = await fetch(`http://localhost:8000/api/documents/${docId}`);
+        const res = await fetch(`${API_URL}/api/documents/${docId}`);
         if (res.ok) {
           const data = await res.json();
           setDocument(prev => ({
@@ -62,7 +65,7 @@ export default function DocumentWorkspace() {
 
   // 2. Establish live WebSocket connection for real-time updates
   useEffect(() => {
-    const ws = new WebSocket(`ws://localhost:8000/ws/${docId}`);
+    const ws = new WebSocket(`${WS_URL}/ws/${docId}`);
     
     ws.onmessage = (event) => {
       const payload = JSON.parse(event.data);

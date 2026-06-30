@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FolderGit2, Plus, Loader2 } from 'lucide-react';
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
 export default function ProjectsList() {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -11,7 +13,7 @@ export default function ProjectsList() {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch('http://localhost:8000/api/projects');
+      const res = await fetch(`${API_URL}/api/projects`);
       const data = await res.json();
       setProjects(data);
     } catch (err) {
@@ -33,7 +35,7 @@ export default function ProjectsList() {
       const formData = new FormData();
       formData.append('name', newProjectName);
       
-      const res = await fetch('http://localhost:8000/api/projects', {
+      const res = await fetch(`${API_URL}/api/projects`, {
         method: 'POST',
         body: formData
       });

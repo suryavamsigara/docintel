@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 
+const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000';
+
 export function usePipelineStream() {
   const [clientId, setClientId] = useState('');
   const [socket, setSocket] = useState(null);
@@ -11,7 +13,7 @@ export function usePipelineStream() {
 
   const connect = useCallback((newClientId) => {
     setClientId(newClientId);
-    const ws = new WebSocket(`ws://localhost:8000/ws/${newClientId}`);
+    const ws = new WebSocket(`${WS_URL}/ws/${newClientId}`);
     
     ws.onmessage = (event) => {
       const payload = JSON.parse(event.data);

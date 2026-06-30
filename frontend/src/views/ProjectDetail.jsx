@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { FileText, UploadCloud, Loader2, CheckCircle2, ChevronRight, Cpu, Sparkles, GitPullRequest, AlertTriangle, Database, RefreshCw, XCircle } from 'lucide-react';
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
 export default function ProjectDetail() {
   const { projectId } = useParams();
   const navigate = useNavigate();
@@ -21,8 +23,8 @@ export default function ProjectDetail() {
   const fetchProjectData = useCallback(async () => {
     try {
       const [docsRes, contraRes] = await Promise.all([
-        fetch(`http://localhost:8000/api/projects/${projectId}/documents`),
-        fetch(`http://localhost:8000/api/projects/${projectId}/contradictions`)
+        fetch(`${API_URL}/api/projects/${projectId}/documents`),
+        fetch(`${API_URL}/api/projects/${projectId}/contradictions`)
       ]);
       if (docsRes.ok) setDocuments(await docsRes.json());
       if (contraRes.ok) setContradictions(await contraRes.json());
@@ -34,7 +36,7 @@ export default function ProjectDetail() {
   useEffect(() => {
     const loadProject = async () => {
       try {
-        const projRes = await fetch(`http://localhost:8000/api/projects/${projectId}`);
+        const projRes = await fetch(`${API_URL}/api/projects/${projectId}`);
         if (projRes.ok) setProject(await projRes.json());
         await fetchProjectData();
       } catch (err) {
@@ -58,7 +60,7 @@ export default function ProjectDetail() {
   const handleRetrySync = async (docId) => {
     setSyncingDocs(prev => ({ ...prev, [docId]: true }));
     try {
-      await fetch(`http://localhost:8000/api/documents/${docId}/sync`, { method: 'POST' });
+      await fetch(`${API_URL}/api/documents/${docId}/sync`, { method: 'POST' });
       await fetchProjectData(); // Refresh list to get new status
     } catch (error) {
       console.error("Sync failed", error);
@@ -78,7 +80,7 @@ export default function ProjectDetail() {
     formData.append('project_id', projectId);
 
     try {
-      await fetch('http://localhost:8000/api/upload', { method: 'POST', headers: { 'X-Processing-Mode': mode }, body: formData });
+      await fetch(`${API_URL}/api/upload`, { method: 'POST', headers: { 'X-Processing-Mode': mode }, body: formData });
       fetchProjectData();
       setActiveTab('DOCUMENTS');
     } catch (err) {

@@ -5,6 +5,8 @@ const INITIAL_PROJECTS = [
   { id: 'p_2', name: 'Q3 Financial Audits', updatedAt: '2 hours ago', docCount: 3 }
 ];
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
 export function useProjectStore() {
   const [projects, setProjects] = useState(INITIAL_PROJECTS);
   const [documents, setDocuments] = useState({});
@@ -75,7 +77,7 @@ export function useProjectStore() {
     formData.append('file', file);
 
     try {
-      await fetch(`http://localhost:8000/api/upload?client_id=${clientId}`, {
+      await fetch(`${API_URL}/api/upload?client_id=${clientId}`, {
         method: 'POST',
         // ADDED HEADERS FOR PROCESSING MODE
         headers: {
