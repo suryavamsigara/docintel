@@ -140,7 +140,6 @@ async def run_full_pipeline(
             client_id, "ingestion", "running",
             detail="Analysing format...",
         )
-        await asyncio.sleep(1.0)
         ingestion_result = await run_ingestion_stage(file)
 
         if ingestion_result.get("status") == "error":
@@ -173,7 +172,6 @@ async def run_full_pipeline(
             client_id, "classification", "running",
             detail=f"Identifying document ({mode_label})...",
         )
-        await asyncio.sleep(1.0)
         class_result = await asyncio.to_thread(_classify, doc_data, mode)
 
         if class_result.get("status") == "error":
