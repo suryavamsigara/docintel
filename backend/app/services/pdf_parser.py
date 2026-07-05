@@ -1,15 +1,9 @@
 import re
 import fitz
-import os
 import pymupdf4llm
 import pytesseract
 from PIL import Image
 from app.models import Page, Paragraph, Heading, Table, ListGroup, OcrText, NormalizedDocument
-
-if os.path.exists('/usr/bin/tesseract'):
-    pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
-elif os.path.exists('/app/.apt/usr/bin/tesseract'):
-    pytesseract.pytesseract.tesseract_cmd = '/app/.apt/usr/bin/tesseract'
 
 # Configurable threshold for flagging bad OCR
 MIN_OCR_CONFIDENCE = 50.0
