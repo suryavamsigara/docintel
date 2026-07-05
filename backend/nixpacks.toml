@@ -1,2 +1,2 @@
-[providers.python]
-pkgs = ["...", "tesseract"]
+[phases.setup]
+nixPkgs = ["...", "tesseract"]
